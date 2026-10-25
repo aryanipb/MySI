@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <external-files-path name="pictures" path="Pictures/" />
+    <!-- Lets the agent hand any file on shared storage to WhatsApp, Gmail, Instagram, etc. -->
+    <external-path name="storage" path="." />
 </paths>

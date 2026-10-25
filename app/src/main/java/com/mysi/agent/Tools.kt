@@ -143,10 +143,10 @@ object Tools {
         return base.apply { mkdirs() }
     }
 
-    private fun resolve(path: String): File =
+    internal fun resolve(path: String): File =
         if (path.startsWith("/")) File(path) else File(Environment.getExternalStorageDirectory(), path)
 
-    private fun launch(ctx: Context, intent: Intent): String =
+    internal fun launch(ctx: Context, intent: Intent): String =
         try {
             ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             "Opened."
@@ -184,21 +184,6 @@ object Tools {
                 launch(ctx, intent).let { "Opening ${hit.first}. $it" }
             },
             ToolDef("list_apps", "List names of all installed apps.") { apps(ctx).map { it.first } },
-            ToolDef(
-                "open_url",
-                "Open a web address in the browser.",
-                listOf(Param("url", "string", "Full URL")),
-            ) { a ->
-                val u = a.str("url").let { if (it.startsWith("http")) it else "https://$it" }
-                launch(ctx, Intent(Intent.ACTION_VIEW, Uri.parse(u)))
-            },
-            ToolDef(
-                "web_search",
-                "Search the web in the browser.",
-                listOf(Param("query", "string", "Search text")),
-            ) { a ->
-                launch(ctx, Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode(a.str("query")))))
-            },
             // ---------- messages, calls, contacts ----------
             ToolDef(
                 "read_sms",
@@ -577,11 +562,11 @@ object Tools {
             ) { a -> pdf(ctx, a.str("title"), a.str("body"), a.str("filename")) },
         )
 
-    private val callingCodes =
+    internal val callingCodes =
         mapOf("in" to "91", "us" to "1", "ca" to "1", "gb" to "44", "ae" to "971", "sa" to "966", "sg" to "65", "au" to "61", "de" to "49", "fr" to "33", "np" to "977", "bd" to "880", "lk" to "94", "pk" to "92")
 
     /** Turns a contact name or a local/international number into WhatsApp's digits-only form. */
-    private fun whatsappTarget(ctx: Context, to: String): Pair<String, String>? {
+    internal fun whatsappTarget(ctx: Context, to: String): Pair<String, String>? {
         val (name, raw) =
             if (to.count { it.isDigit() } >= 7) Pair(to, to)
             else {
