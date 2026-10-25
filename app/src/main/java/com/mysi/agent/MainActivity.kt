@@ -115,11 +115,18 @@ class MainActivity : UiActivity(), Host {
     private fun render(e: Event) {
         when (e) {
             is Event.Status -> status.text = e.text
-            is Event.User -> card(log, Color.rgb(28, 29, 35)).also { text(it, e.text, 15f) }
+            is Event.User ->
+                card(log, Color.rgb(28, 29, 35)).also {
+                    text(it, "You", 11f, muted, bold = true)
+                    text(it, e.text, 15f)
+                }
             is Event.ToolCall -> text(log, "⚙  ${e.name}(${e.args})", 12f, muted).typeface = Typeface.MONOSPACE
             is Event.ToolResult -> text(log, "↳ ${e.text.take(280)}", 12f, muted).apply { setPadding(dp(14), 0, 0, 0) }
             is Event.Reply -> {
-                card(log).also { text(it, e.text, 15f) }
+                card(log).also {
+                    text(it, "MySI", 11f, muted, bold = true).typeface = serif
+                    text(it, e.text, 15f)
+                }
                 status.text = "Ready · ${Agent.backend} · ${Agent.toolCount} tools"
             }
             is Event.Error -> {

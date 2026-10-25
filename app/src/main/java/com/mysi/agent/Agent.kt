@@ -3,6 +3,7 @@ package com.mysi.agent
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import com.google.ai.edge.litertlm.ActivationDataType
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
@@ -83,7 +84,19 @@ object Agent {
                 for (b in listOf<Backend>(Backend.GPU(), Backend.CPU())) {
                     emit(Event.Status("Loading model on ${b.name}…"))
                     try {
-                        val e = Engine(EngineConfig(modelPath = path, backend = b, maxNumTokens = 8192, cacheDir = app.cacheDir.path))
+                        // FP16 GPU activations garble Gemma 4 output past ~2k tokens of context
+                        // (LiteRT-LM issues #4001, #3879, #3913); FLOAT32 keeps it exact. The cache
+                        // dir is separate so no kernels compiled for FP16 are reused.
+                        val gpu = b is Backend.GPU
+                        val e = Engine(
+                            EngineConfig(
+                                modelPath = path,
+                                backend = b,
+                                maxNumTokens = 8192,
+                                cacheDir = java.io.File(app.cacheDir, if (gpu) "litertlm-gpu-f32" else "litertlm-cpu").apply { mkdirs() }.path,
+                                activationDataType = if (gpu) ActivationDataType.FLOAT32 else null,
+                            )
+                        )
                         e.initialize()
                         engine = e
                         backend = b.name
