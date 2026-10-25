@@ -90,6 +90,21 @@ class AgentAccessibilityService : AccessibilityService() {
         return if (field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) "Typed." else "Typing failed."
     }
 
+    /** Clicks a view by resource id, falling back to its accessibility label, only inside [pkg]. */
+    fun clickById(id: String, label: String, pkg: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        if (root.packageName?.toString() != pkg) return false
+        val node =
+            root.findAccessibilityNodeInfosByViewId(id).firstOrNull()
+                ?: root.findAccessibilityNodeInfosByText(label).firstOrNull {
+                    it.contentDescription?.toString().equals(label, true)
+                }
+                ?: return false
+        var target: AccessibilityNodeInfo? = node
+        while (target != null && !target.isClickable) target = target.parent
+        return target?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+    }
+
     fun scroll(direction: String): String {
         val m = resources.displayMetrics
         val x = m.widthPixels / 2f

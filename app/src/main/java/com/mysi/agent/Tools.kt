@@ -36,6 +36,7 @@ import android.provider.Settings
 import android.provider.Telephony
 import android.speech.tts.TextToSpeech
 import android.telephony.SmsManager
+import android.telephony.TelephonyManager
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
@@ -223,6 +224,19 @@ object Tools {
                     }
                 out
             },
+            ToolDef(
+                "send_whatsapp",
+                "Send a WhatsApp message to a contact name or phone number. Use this whenever the user says WhatsApp.",
+                listOf(
+                    Param("to", "string", "Contact name or phone number"),
+                    Param("message", "string", "Message text"),
+                ),
+                confirm = { a ->
+                    val who = whatsappTarget(ctx, a.str("to"))
+                    if (who == null) "No contact or number matches '${a.str("to")}'. Continue anyway?"
+                    else "Send WhatsApp to ${who.first} (+${who.second})?\n\n\"${a.str("message")}\""
+                },
+            ) { a -> sendWhatsapp(ctx, a.str("to"), a.str("message")) },
             ToolDef(
                 "send_sms",
                 "Send an SMS text message.",
@@ -562,6 +576,60 @@ object Tools {
                 ),
             ) { a -> pdf(ctx, a.str("title"), a.str("body"), a.str("filename")) },
         )
+
+    private val callingCodes =
+        mapOf("in" to "91", "us" to "1", "ca" to "1", "gb" to "44", "ae" to "971", "sa" to "966", "sg" to "65", "au" to "61", "de" to "49", "fr" to "33", "np" to "977", "bd" to "880", "lk" to "94", "pk" to "92")
+
+    /** Turns a contact name or a local/international number into WhatsApp's digits-only form. */
+    private fun whatsappTarget(ctx: Context, to: String): Pair<String, String>? {
+        val (name, raw) =
+            if (to.count { it.isDigit() } >= 7) Pair(to, to)
+            else {
+                val hits = mutableListOf<Pair<String, String>>()
+                ctx.contentResolver
+                    .query(
+                        ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                        arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
+                        "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?",
+                        arrayOf("%$to%"),
+                        null,
+                    )
+                    ?.use { c -> while (c.moveToNext()) hits += c.getString(0) to c.getString(1) }
+                (hits.firstOrNull { it.first.equals(to, true) } ?: hits.firstOrNull()) ?: return null
+            }
+        var digits = raw.filter { it.isDigit() }
+        val code = callingCodes[ctx.getSystemService(TelephonyManager::class.java).simCountryIso.lowercase()] ?: "91"
+        digits = when {
+            raw.trim().startsWith("+") -> digits
+            digits.startsWith("00") -> digits.drop(2)
+            digits.startsWith("0") -> code + digits.drop(1)
+            digits.length <= 10 -> code + digits
+            else -> digits
+        }
+        return name to digits
+    }
+
+    private suspend fun sendWhatsapp(ctx: Context, to: String, message: String): String {
+        val (name, number) = whatsappTarget(ctx, to) ?: return "No contact or number matches '$to'. Use search_contacts."
+        val pkg = listOf("com.whatsapp", "com.whatsapp.w4b").firstOrNull {
+            runCatching { ctx.packageManager.getPackageInfo(it, 0) }.isSuccess
+        } ?: return "WhatsApp is not installed."
+        val opened = launch(
+            ctx,
+            Intent(Intent.ACTION_VIEW, Uri.parse("https://api.whatsapp.com/send?phone=$number&text=" + Uri.encode(message))).setPackage(pkg),
+        )
+        if (opened.startsWith("Could not")) return opened
+        val a11y = AgentAccessibilityService.instance
+            ?: return "Opened the WhatsApp chat with $name with the message typed, but screen control is off, so the user must tap Send."
+        repeat(20) {
+            delay(500)
+            if (withContext(Dispatchers.Main) { a11y.clickById("$pkg:id/send", "Send", pkg) }) {
+                delay(800)
+                return "WhatsApp message sent to $name (+$number)."
+            }
+        }
+        return "Opened the chat with $name but could not find the Send button. Use read_screen to see what WhatsApp is showing."
+    }
 
     private const val NO_A11Y = "Screen control is off. Ask the user to enable 'MySI Agent control' in Accessibility settings."
 
