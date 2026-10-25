@@ -129,7 +129,7 @@ class MainActivity : UiActivity(), Host {
                     text(it, e.text, 15f)
                 }
             is Event.ToolCall -> text(log, "⚙  ${e.name}(${e.args})", 12f, muted).typeface = Typeface.MONOSPACE
-            is Event.ToolResult -> text(log, "↳ ${e.text.take(280)}", 12f, muted).apply { setPadding(dp(14), 0, 0, 0) }
+            is Event.ToolResult -> text(log, "↳ ${e.text.take(700)}", 12f, muted).apply { setPadding(dp(14), 0, 0, 0) }
             is Event.Reply -> {
                 card(log).also {
                     text(it, "MySI", 11f, muted, bold = true).typeface = serif

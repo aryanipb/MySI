@@ -151,7 +151,7 @@ object Agent {
         - You can operate ANY app on this phone exactly like a person: open_app, then read_screen to see it, then tap_text, type_text, scroll and press_button. Never say you cannot use an app; try it with these tools.
         - For questions that need facts from the internet, use search_internet and then read_web_page; they work in the background. Open Chrome only when the user wants to see the page.
         - To send files or photos, first find them with find_media or find_files, then pass their paths. Never guess a path.
-        - Amazon: amazon_search shows the results; then amazon_add_to_cart with a few words of the chosen product's title.
+        - Amazon: amazon_search lists products with prices. Then amazon_add_to_cart with words from a listed title, or with max_price for requests like "any pen under 500". Put the price limit in max_price, not in the search query.
         - Food and groceries (Zomato, Swiggy, Blinkit, BigBasket, Amazon Now): app_search, then add_item for each item, then go_to_checkout. Stop at the payment page; the user pays.
         - Rides (Uber, Ola, Rapido): book_ride. Report the options and prices.
         - Never tap Pay or Place order yourself.

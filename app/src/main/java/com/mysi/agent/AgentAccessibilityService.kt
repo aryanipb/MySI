@@ -101,6 +101,18 @@ class AgentAccessibilityService : AccessibilityService() {
         return walk(rootInActiveWindow, 0)
     }
 
+    /** Every node in the window that matches, in screen order. */
+    fun findAll(match: (AccessibilityNodeInfo) -> Boolean): List<AccessibilityNodeInfo> {
+        val out = mutableListOf<AccessibilityNodeInfo>()
+        fun walk(n: AccessibilityNodeInfo?, depth: Int) {
+            if (n == null || depth > 60 || out.size > 300) return
+            if (match(n)) out += n
+            for (i in 0 until n.childCount) walk(n.getChild(i), depth + 1)
+        }
+        walk(rootInActiveWindow, 0)
+        return out
+    }
+
     fun label(n: AccessibilityNodeInfo) = (n.text ?: n.contentDescription)?.toString()?.trim().orEmpty()
 
     fun screenHas(pattern: Regex) = findNode { pattern.containsMatchIn(label(it)) } != null

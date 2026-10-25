@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
 import android.telephony.TelephonyManager
+import android.view.accessibility.AccessibilityNodeInfo
 import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import java.io.File
@@ -305,32 +306,47 @@ object AppTools {
             },
             ToolDef(
                 "amazon_search",
-                "Search for a product on Amazon (app if installed, else browser).",
-                listOf(Param("query", "string", "Product to search for")),
+                "Search Amazon and return the products with prices (app if installed, else browser).",
+                listOf(
+                    Param("query", "string", "Product to search for, without the price limit"),
+                    Param("max_price", "integer", "Only list products at or below this price in rupees", false),
+                ),
             ) { a ->
                 val url = "https://www.${countryHost(ctx)}/s?k=" + Uri.encode(a.str("query"))
                 val app = listOf("in.amazon.mShop.android.shopping", "com.amazon.mShop.android.shopping").firstOrNull { installed(ctx, it) }
                 val r = Tools.launch(ctx, Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply { app?.let { setPackage(it) } })
                 if (r.startsWith("Could not")) return@ToolDef r
-                val a11y = AgentAccessibilityService.instance
+                val s = AgentAccessibilityService.instance
                     ?: return@ToolDef "Amazon results are open, but screen control is off so they cannot be read."
                 // Results render progressively; wait until prices are on screen before reading.
-                for (i in 0 until 16) {
-                    if (a11y.screenHas(PRICE)) break
+                for (i in 0 until 20) {
+                    if (s.screenHas(PRICE)) break
                     delay(500)
                 }
-                delay(800)
-                "Amazon results for '${a.str("query")}':\n" + a11y.readScreen().take(3000) +
-                    "\nPick one and call amazon_add_to_cart with a few words of its title."
+                delay(1000)
+                val max = a.int("max_price", 0)
+                val found = linkedMapOf<String, Int>()
+                for (page in 0 until 3) {
+                    products(s).forEach { found.putIfAbsent(it.title, it.price) }
+                    if (found.size >= 12) break
+                    s.scroll("down")
+                    delay(1300)
+                }
+                if (found.isEmpty()) return@ToolDef "Could not read products from Amazon's page. Screen:\n" + s.readScreen().take(2500)
+                val list = found.entries.filter { max <= 0 || it.value <= max }
+                if (list.isEmpty()) return@ToolDef "None of the ${found.size} products read were at or below ₹$max. Try a different query."
+                "Amazon products for '${a.str("query")}'" + (if (max > 0) " at or below ₹$max" else "") + " (sponsored skipped):\n" +
+                    list.take(12).mapIndexed { i, e -> "${i + 1}. ${e.key.take(110)} — ₹${e.value}" }.joinToString("\n") +
+                    "\nTo add one: amazon_add_to_cart with a few words of its title, or with max_price to take the first match."
             },
             ToolDef(
                 "amazon_add_to_cart",
-                "Open a product from the Amazon results on screen and add it to the cart. Stops at the cart; never buys.",
+                "Add an Amazon product to the cart. Give words from its title, or max_price to pick the first product at or below that price. Asks the user first; never buys.",
                 listOf(
-                    Param("product", "string", "A few distinctive words from the product title shown in the results; empty if the product page is already open", false),
+                    Param("product", "string", "A few distinctive words from the product title; empty to use max_price or the page already open", false),
+                    Param("max_price", "integer", "Pick the first non-sponsored product at or below this price in rupees", false),
                 ),
-                confirm = { a -> "Add to your Amazon cart:\n\n${a.str("product").ifBlank { "the product open on screen" }}" },
-            ) { a -> amazonAddToCart(a.str("product")) },
+            ) { a -> amazonAddToCart(a.str("product"), a.int("max_price", 0)) },
             ToolDef(
                 "youtube_search",
                 "Search YouTube.",
@@ -432,34 +448,95 @@ object AppTools {
     private val ADD_TO_CART = Regex("^add to (cart|basket)$", RegexOption.IGNORE_CASE)
     private val ADDED = Regex("added to (cart|basket)|item added|go to cart|proceed to buy \\(", RegexOption.IGNORE_CASE)
 
-    private suspend fun amazonAddToCart(product: String): String {
+    private class Product(val title: String, val price: Int, val node: AccessibilityNodeInfo)
+
+    private val RUPEES = Regex("(?:₹|Rs\\.?)\\s?([0-9][0-9,]*)")
+    private val MRP = Regex("m\\.?r\\.?p|list price|was ₹", RegexOption.IGNORE_CASE)
+
+    private fun rupees(text: String) = RUPEES.find(text)?.groupValues?.get(1)?.replace(",", "")?.toIntOrNull()
+
+    private fun texts(s: AgentAccessibilityService, n: AccessibilityNodeInfo, depth: Int = 0): List<Pair<String, AccessibilityNodeInfo>> {
+        if (depth > 8) return emptyList()
+        val own = s.label(n).takeIf { it.isNotEmpty() }?.let { listOf(it to n) }.orEmpty()
+        return own + (0 until n.childCount).flatMap { i -> n.getChild(i)?.let { texts(s, it, depth + 1) }.orEmpty() }
+    }
+
+    /**
+     * Reads product cards off a results page: each selling price is paired with the title in the
+     * same card. Struck-through list prices (M.R.P.) and sponsored cards are skipped.
+     */
+    private fun products(s: AgentAccessibilityService): List<Product> {
+        val out = linkedMapOf<String, Product>()
+        for (p in s.findAll { RUPEES.containsMatchIn(s.label(it)) }) {
+            val label = s.label(p)
+            if (MRP.containsMatchIn(label.substringBefore("₹"))) continue
+            val price = rupees(label) ?: continue
+            // Some builds put the whole card in one description: "Title… ₹199 M.R.P ₹299".
+            if (label.length >= 40) {
+                val title = label.substringBefore("₹").trim()
+                if (title.length >= 20 && !title.contains("Sponsored", true)) out.putIfAbsent(title, Product(title, price, p))
+                continue
+            }
+            var card: AccessibilityNodeInfo? = p.parent
+            var hit: Pair<String, AccessibilityNodeInfo>? = null
+            var all: List<Pair<String, AccessibilityNodeInfo>> = emptyList()
+            for (level in 0 until 5) {
+                val c = card ?: break
+                all = texts(s, c)
+                hit = all.filter { it.first.length >= 20 && !RUPEES.containsMatchIn(it.first) }.maxByOrNull { it.first.length }
+                if (hit != null) break
+                card = c.parent
+            }
+            val title = hit ?: continue
+            if (all.any { it.first.equals("Sponsored", true) || it.first.startsWith("Sponsored ", true) }) continue
+            out.putIfAbsent(title.first, Product(title.first, price, title.second))
+        }
+        return out.values.toList()
+    }
+
+    private suspend fun amazonAddToCart(product: String, maxPrice: Int): String {
         val a11y = AgentAccessibilityService.instance ?: return "Screen control is off. Ask the user to enable it."
         if (a11y.packageOnScreen()?.contains("amazon", true) != true) return "Amazon is not on screen. Use amazon_search first."
-        if (product.isNotBlank()) {
+        var chosen = ""
+        if (product.isNotBlank() || maxPrice > 0) {
             // Match on all words so a shortened title still finds the right listing.
             val words = product.lowercase().split(' ').filter { it.length > 1 }
-            val hit = withContext(Dispatchers.Main) {
-                a11y.findNode { n -> a11y.label(n).lowercase().let { l -> l.length > 10 && words.all { it in l } } }?.let { a11y.click(it) }
+            var pick: Product? = null
+            for (page in 0 until 4) {
+                pick = products(a11y).firstOrNull { p ->
+                    (words.isEmpty() || words.all { it in p.title.lowercase() }) && (maxPrice <= 0 || p.price <= maxPrice)
+                }
+                if (pick != null) break
+                a11y.scroll("down")
+                delay(1200)
             }
-            if (hit != true) return "No product matching '$product' on screen. Use read_screen and pick words from a visible title."
+            val p = pick ?: return "No product " + (if (product.isNotBlank()) "matching '$product' " else "") +
+                (if (maxPrice > 0) "at or below ₹$maxPrice " else "") + "found in the results. Try amazon_search again with another query."
+            if (!Agent.approve("Add to Amazon cart?", "${p.title.take(160)}\n₹${p.price}\n\nAdds to cart only. Nothing is bought."))
+                return "The user declined."
+            if (!withContext(Dispatchers.Main) { a11y.click(p.node) }) return "Could not open '${p.title.take(80)}'."
+            chosen = "${p.title.take(100)} (₹${p.price})"
             delay(3500)
+        } else {
+            val title = a11y.findNode { a11y.label(it).length in 25..250 }?.let { a11y.label(it) }.orEmpty()
+            if (!Agent.approve("Add to Amazon cart?", "${title.take(160)}\n\nAdds to cart only. Nothing is bought.")) return "The user declined."
+            chosen = title.take(100)
         }
-        val title = a11y.findNode { a11y.label(it).length in 25..250 }?.let { a11y.label(it) }.orEmpty()
         repeat(10) { attempt ->
             val button = a11y.findNode { ADD_TO_CART.matches(a11y.label(it)) }
             if (button != null && withContext(Dispatchers.Main) { a11y.click(button) }) {
                 repeat(12) {
                     delay(500)
-                    if (a11y.screenHas(ADDED)) return "Added to cart: ${title.take(120)}. Not purchased."
+                    if (a11y.screenHas(ADDED)) return "Added to cart: $chosen. Not purchased."
                 }
-                return "Tapped Add to Cart for ${title.take(120)}, but Amazon did not confirm. It may ask to choose a size or colour; use read_screen."
+                return "Tapped Add to Cart for $chosen, but Amazon did not confirm. It may ask to choose a size or colour; use read_screen."
             }
             if (attempt < 9) {
                 a11y.scroll("down")
                 delay(900)
             }
         }
-        return "Could not find an Add to Cart button. The item may be unavailable, need a size or colour, or only offer Buy Now. Use read_screen."
+        return "Could not find an Add to Cart button for $chosen. The item may be unavailable, need a size or colour, or only offer Buy Now. Use read_screen."
     }
 
     private fun findMedia(ctx: Context, a: Args): Any {
