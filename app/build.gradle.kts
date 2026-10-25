@@ -12,8 +12,8 @@ android {
         minSdk = 34
         // 35, not 36: API 36 replaces BODY_SENSORS with Health Connect permissions.
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.6"
+        versionCode = 7
+        versionName = "0.7"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 

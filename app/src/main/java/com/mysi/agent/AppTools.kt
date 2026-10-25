@@ -336,7 +336,9 @@ object AppTools {
                 val list = found.entries.filter { max <= 0 || it.value <= max }
                 if (list.isEmpty()) return@ToolDef "None of the ${found.size} products read were at or below ₹$max. Try a different query."
                 "Amazon products for '${a.str("query")}'" + (if (max > 0) " at or below ₹$max" else "") + " (sponsored skipped):\n" +
-                    list.take(12).mapIndexed { i, e -> "${i + 1}. ${e.key.take(110)} — ₹${e.value}" }.joinToString("\n") +
+                    list.take(12).mapIndexed { i, e ->
+                        "${i + 1}. ${e.key.take(110)} — ₹${e.value}" + if (CUSTOM.containsMatchIn(e.key)) " (needs personalisation, avoid)" else ""
+                    }.joinToString("\n") +
                     "\nTo add one: amazon_add_to_cart with a few words of its title, or with max_price to take the first match."
             },
             ToolDef(
@@ -445,7 +447,16 @@ object AppTools {
     }
 
     private val PRICE = Regex("₹\\s?[0-9]|\\$\\s?[0-9]|Rs\\.?\\s?[0-9]")
-    private val ADD_TO_CART = Regex("^add to (cart|basket)$", RegexOption.IGNORE_CASE)
+    private val ADD_TO_CART = Regex("^add to (cart|basket)\\b.*", RegexOption.IGNORE_CASE)
+
+    /** Banners and badges that sit inside result cards and must never be taken for a title. */
+    private val BADGE = Regex(
+        "delivery|festival|\\bprime\\b|\\bdeal\\b|limited time|coupon|bought in past|cashback|\\bsave\\b|sponsored|out of 5|ratings|amazon now|visit the|\\boffers?\\b",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** Products that need engraving or a name first show "Customise now" instead of Add to Cart. */
+    private val CUSTOM = Regex("personali[sz]|customi[sz]|engrav|name print|with your name", RegexOption.IGNORE_CASE)
     private val ADDED = Regex("added to (cart|basket)|item added|go to cart|proceed to buy \\(", RegexOption.IGNORE_CASE)
 
     private class Product(val title: String, val price: Int, val node: AccessibilityNodeInfo)
@@ -474,7 +485,7 @@ object AppTools {
             // Some builds put the whole card in one description: "Title… ₹199 M.R.P ₹299".
             if (label.length >= 40) {
                 val title = label.substringBefore("₹").trim()
-                if (title.length >= 20 && !title.contains("Sponsored", true)) out.putIfAbsent(title, Product(title, price, p))
+                if (title.length >= 20 && !BADGE.containsMatchIn(title)) out.putIfAbsent(title, Product(title, price, p))
                 continue
             }
             var card: AccessibilityNodeInfo? = p.parent
@@ -483,7 +494,8 @@ object AppTools {
             for (level in 0 until 5) {
                 val c = card ?: break
                 all = texts(s, c)
-                hit = all.filter { it.first.length >= 20 && !RUPEES.containsMatchIn(it.first) }.maxByOrNull { it.first.length }
+                hit = all.filter { it.first.length >= 20 && !RUPEES.containsMatchIn(it.first) && !BADGE.containsMatchIn(it.first) }
+                    .maxByOrNull { it.first.length }
                 if (hit != null) break
                 card = c.parent
             }
@@ -494,49 +506,89 @@ object AppTools {
         return out.values.toList()
     }
 
-    private suspend fun amazonAddToCart(product: String, maxPrice: Int): String {
-        val a11y = AgentAccessibilityService.instance ?: return "Screen control is off. Ask the user to enable it."
-        if (a11y.packageOnScreen()?.contains("amazon", true) != true) return "Amazon is not on screen. Use amazon_search first."
-        var chosen = ""
-        if (product.isNotBlank() || maxPrice > 0) {
-            // Match on all words so a shortened title still finds the right listing.
-            val words = product.lowercase().split(' ').filter { it.length > 1 }
-            var pick: Product? = null
-            for (page in 0 until 4) {
-                pick = products(a11y).firstOrNull { p ->
-                    (words.isEmpty() || words.all { it in p.title.lowercase() }) && (maxPrice <= 0 || p.price <= maxPrice)
-                }
-                if (pick != null) break
-                a11y.scroll("down")
-                delay(1200)
-            }
-            val p = pick ?: return "No product " + (if (product.isNotBlank()) "matching '$product' " else "") +
-                (if (maxPrice > 0) "at or below ₹$maxPrice " else "") + "found in the results. Try amazon_search again with another query."
-            if (!Agent.approve("Add to Amazon cart?", "${p.title.take(160)}\n₹${p.price}\n\nAdds to cart only. Nothing is bought."))
-                return "The user declined."
-            if (!withContext(Dispatchers.Main) { a11y.click(p.node) }) return "Could not open '${p.title.take(80)}'."
-            chosen = "${p.title.take(100)} (₹${p.price})"
-            delay(3500)
-        } else {
-            val title = a11y.findNode { a11y.label(it).length in 25..250 }?.let { a11y.label(it) }.orEmpty()
-            if (!Agent.approve("Add to Amazon cart?", "${title.take(160)}\n\nAdds to cart only. Nothing is bought.")) return "The user declined."
-            chosen = title.take(100)
-        }
-        repeat(10) { attempt ->
+    /** Taps Add to Cart on the open page (scrolling to it) and waits for Amazon's confirmation. */
+    private suspend fun addOnPage(a11y: AgentAccessibilityService, seen: MutableSet<String>): Boolean? {
+        repeat(7) { attempt ->
             val button = a11y.findNode { ADD_TO_CART.matches(a11y.label(it)) }
             if (button != null && withContext(Dispatchers.Main) { a11y.click(button) }) {
                 repeat(12) {
                     delay(500)
-                    if (a11y.screenHas(ADDED)) return "Added to cart: $chosen. Not purchased."
+                    if (a11y.screenHas(ADDED)) return true
                 }
-                return "Tapped Add to Cart for $chosen, but Amazon did not confirm. It may ask to choose a size or colour; use read_screen."
+                return null // tapped, but no confirmation
             }
-            if (attempt < 9) {
+            a11y.findAll { it.isClickable && a11y.label(it).length in 2..40 }.forEach { seen += a11y.label(it) }
+            if (attempt < 6) {
                 a11y.scroll("down")
                 delay(900)
             }
         }
-        return "Could not find an Add to Cart button for $chosen. The item may be unavailable, need a size or colour, or only offer Buy Now. Use read_screen."
+        return false
+    }
+
+    private suspend fun amazonAddToCart(product: String, maxPrice: Int): String {
+        val a11y = AgentAccessibilityService.instance ?: return "Screen control is off. Ask the user to enable it."
+        if (a11y.packageOnScreen()?.contains("amazon", true) != true) return "Amazon is not on screen. Use amazon_search first."
+        val seen = linkedSetOf<String>()
+        if (product.isBlank() && maxPrice <= 0) {
+            val title = a11y.findNode { a11y.label(it).length in 25..250 }?.let { a11y.label(it) }.orEmpty()
+            if (!Agent.approve("Add to Amazon cart?", "${title.take(160)}\n\nAdds to cart only. Nothing is bought.")) return "The user declined."
+            return when (addOnPage(a11y, seen)) {
+                true -> "Added to cart: ${title.take(100)}. Not purchased."
+                null -> "Tapped Add to Cart, but Amazon did not confirm. It may need a size or colour; use read_screen."
+                false -> "No Add to Cart button on this page. Buttons seen: ${seen.take(25).joinToString(", ")}"
+            }
+        }
+        val words = product.lowercase().split(' ').filter { it.length > 1 }
+        // First the named product; if that cannot be added, any other non-personalised match under the price.
+        fun wanted(p: Product, strict: Boolean) =
+            (maxPrice <= 0 || p.price <= maxPrice) &&
+                if (strict) words.isNotEmpty() && words.all { it in p.title.lowercase() }
+                else !CUSTOM.containsMatchIn(p.title) && (maxPrice > 0 || words.all { it in p.title.lowercase() })
+        val tried = linkedSetOf<String>()
+        var approved = false
+        var scrolls = 0
+        while (tried.size < 3 && scrolls < 5) {
+            val onScreen = products(a11y).filter { it.title !in tried }
+            val pick = onScreen.firstOrNull { wanted(it, strict = true) } ?: onScreen.firstOrNull { wanted(it, strict = false) }
+            if (pick == null) {
+                a11y.scroll("down")
+                delay(1200)
+                scrolls++
+                continue
+            }
+            if (!approved) {
+                val backups = onScreen.filter { it != pick && wanted(it, strict = false) }.take(2)
+                val plan = "${pick.title.take(140)}\n₹${pick.price}" +
+                    (if (backups.isNotEmpty()) "\n\nIf it can't be added, the next match:\n" + backups.joinToString("\n") { "• ${it.title.take(80)} — ₹${it.price}" } else "") +
+                    "\n\nAdds to cart only. Nothing is bought."
+                if (!Agent.approve("Add to Amazon cart?", plan)) return "The user declined."
+                approved = true
+            }
+            tried += pick.title
+            val label = "${pick.title.take(100)} (₹${pick.price})"
+            // Many result cards carry their own Add to Cart button; use it without opening the page.
+            val quick = ShopTools.buttonNear(a11y, pick.node, ADD_TO_CART)
+            if (quick != null && withContext(Dispatchers.Main) { a11y.click(quick) }) {
+                repeat(10) {
+                    delay(500)
+                    if (a11y.screenHas(ADDED) || a11y.screenHas(Regex("^\\d+ in cart$|^remove$|^delete$", RegexOption.IGNORE_CASE)))
+                        return "Added to cart from the results: $label. Not purchased."
+                }
+            }
+            if (!withContext(Dispatchers.Main) { a11y.click(pick.node) }) continue
+            delay(3500)
+            when (addOnPage(a11y, seen)) {
+                true -> return "Added to cart: $label. Not purchased."
+                null -> return "Tapped Add to Cart for $label, but Amazon did not confirm. It may need a size or colour; use read_screen."
+                false -> {
+                    a11y.global("back")
+                    delay(2200)
+                }
+            }
+        }
+        return "Could not add any of: ${tried.joinToString("; ") { it.take(60) }}. " +
+            "Buttons seen on the product pages: ${seen.take(25).joinToString(", ").ifBlank { "none" }}."
     }
 
     private fun findMedia(ctx: Context, a: Args): Any {

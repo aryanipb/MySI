@@ -79,7 +79,7 @@ object ShopTools {
         s.label(n).lowercase().let { l -> words.isNotEmpty() && words.all { it in l } }
 
     /** Finds a button matching [pattern] inside the same row/card as [item], climbing a few levels. */
-    private fun buttonNear(s: AgentAccessibilityService, item: AccessibilityNodeInfo, pattern: Regex): AccessibilityNodeInfo? {
+    internal fun buttonNear(s: AgentAccessibilityService, item: AccessibilityNodeInfo, pattern: Regex): AccessibilityNodeInfo? {
         var scope: AccessibilityNodeInfo? = item
         repeat(6) {
             scope = scope?.parent ?: return null
