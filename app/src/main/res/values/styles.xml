@@ -1,0 +1,13 @@
+<resources>
+<style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+<item name="android:fontFamily">@font/google_sans</item>
+<item name="android:colorAccent">#F8F7F4</item>
+<item name="android:windowLightStatusBar">false</item>
+<item name="android:windowBackground">#000000</item>
+<item name="android:statusBarColor">#000000</item>
+<item name="android:navigationBarColor">#000000</item>
+<item name="android:windowActionModeOverlay">true</item>
+<item name="android:windowNoTitle">true</item>
+</style>
+<color name="launcher_black">#030304</color>
+</resources>

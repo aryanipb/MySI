@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_description">Lets the on-device MySI agent read the screen, tap, type, scroll and press system buttons when you ask it to. Nothing leaves the phone.</string>
+</resources>
