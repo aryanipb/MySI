@@ -5,3 +5,4 @@ local.properties
 .idea/
 .kotlin/
 MySI.apk
+MySI-arm64.apk
