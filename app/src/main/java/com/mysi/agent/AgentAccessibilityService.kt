@@ -90,6 +90,53 @@ class AgentAccessibilityService : AccessibilityService() {
         return if (field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) "Typed." else "Typing failed."
     }
 
+    /** Depth-first search of the whole window, including WebView content such as Amazon pages. */
+    fun findNode(match: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
+        fun walk(n: AccessibilityNodeInfo?, depth: Int): AccessibilityNodeInfo? {
+            if (n == null || depth > 60) return null
+            if (match(n)) return n
+            for (i in 0 until n.childCount) walk(n.getChild(i), depth + 1)?.let { return it }
+            return null
+        }
+        return walk(rootInActiveWindow, 0)
+    }
+
+    fun label(n: AccessibilityNodeInfo) = (n.text ?: n.contentDescription)?.toString()?.trim().orEmpty()
+
+    fun screenHas(pattern: Regex) = findNode { pattern.containsMatchIn(label(it)) } != null
+
+    fun packageOnScreen() = rootInActiveWindow?.packageName?.toString()
+
+    /** Clicks the node (or its nearest clickable parent); falls back to a tap on its centre. */
+    fun click(node: AccessibilityNodeInfo): Boolean {
+        var target: AccessibilityNodeInfo? = node
+        while (target != null && !target.isClickable) target = target.parent
+        if (target?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) return true
+        node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+        val r = Rect().also { node.getBoundsInScreen(it) }
+        val m = resources.displayMetrics
+        if (r.isEmpty || r.centerY() !in 1 until m.heightPixels || r.centerX() !in 1 until m.widthPixels) return false
+        gesture(r.exactCenterX(), r.exactCenterY(), r.exactCenterX(), r.exactCenterY(), 60)
+        return true
+    }
+
+    /** Presses the keyboard's search/enter key on the focused field. */
+    fun submit(): Boolean {
+        val field = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
+        return field.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+    }
+
+    /** Taps the screen's search bar, for apps whose search box is a button until tapped. */
+    fun focusSearch(): Boolean {
+        val node = findNode { n ->
+            val id = n.viewIdResourceName.orEmpty()
+            val hint = n.hintText?.toString().orEmpty()
+            (n.isClickable || n.isEditable) &&
+                listOf(label(n), hint, id).any { it.contains("search", true) }
+        } ?: return false
+        return click(node)
+    }
+
     /** Clicks a view by resource id, falling back to its accessibility label, only inside [pkg]. */
     fun clickById(id: String, label: String, pkg: String): Boolean {
         val root = rootInActiveWindow ?: return false

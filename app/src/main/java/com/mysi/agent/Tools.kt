@@ -82,13 +82,14 @@ class Args(private val m: Map<String, Any?>) {
 
 /**
  * One device capability exposed to the model. [confirm] returns the question shown to the user
- * before anything leaves the phone or is overwritten; null means the tool runs without asking.
+ * before anything leaves the phone or is overwritten; a null lambda or a null question means the
+ * tool runs without asking.
  */
 class ToolDef(
     val name: String,
     val description: String,
     val params: List<Param> = emptyList(),
-    val confirm: ((Args) -> String)? = null,
+    val confirm: ((Args) -> String?)? = null,
     val run: suspend (Args) -> Any?,
 ) {
     fun schemaJson(): String {
@@ -122,6 +123,9 @@ class ToolDef(
 
 /** UI-side abilities the agent borrows from the visible activity. */
 interface Host {
+    /** True while the MySI screen is in front, so an in-app dialog can be seen. */
+    val inFront: Boolean
+
     suspend fun confirm(title: String, message: String): Boolean
 
     suspend fun takePhoto(file: File): Boolean
@@ -506,6 +510,9 @@ object Tools {
                 "tap_text",
                 "Tap the button, switch or item on screen that shows this text.",
                 listOf(Param("text", "string", "Visible text of the element")),
+                confirm = { a ->
+                    if (MONEY.containsMatchIn(a.str("text"))) "Tap \"${a.str("text")}\"? This can place an order or make a payment." else null
+                },
             ) { a ->
                 val s = AgentAccessibilityService.instance ?: return@ToolDef NO_A11Y
                 withContext(Dispatchers.Main) { s.tapText(a.str("text")) }.also { delay(700) }
@@ -514,7 +521,15 @@ object Tools {
                 "type_text",
                 "Type text into the focused text field on screen.",
                 listOf(Param("text", "string", "Text to type")),
-            ) { a -> AgentAccessibilityService.instance?.typeText(a.str("text")) ?: NO_A11Y },
+            ) { a ->
+                val s = AgentAccessibilityService.instance ?: return@ToolDef NO_A11Y
+                val first = s.typeText(a.str("text"))
+                if (first == "Typed.") return@ToolDef first
+                // Many apps (Amazon, YouTube, Settings) show a search *button* that opens the real field.
+                if (!withContext(Dispatchers.Main) { s.focusSearch() }) return@ToolDef first
+                delay(900)
+                s.typeText(a.str("text"))
+            },
             ToolDef(
                 "scroll",
                 "Scroll the current screen.",
@@ -615,6 +630,14 @@ object Tools {
         }
         return "Opened the chat with $name but could not find the Send button. Use read_screen to see what WhatsApp is showing."
     }
+
+    /** Labels that can spend money; tapping them always needs the user's approval. */
+    internal val MONEY =
+        Regex(
+            "buy now|place (your )?order|\\bpay\\b|proceed to pay|confirm (order|payment|pickup|booking|ride)|subscribe|" +
+                "^book\\b|book (ride|now|cab|auto|bike)|^request\\b|swipe to",
+            RegexOption.IGNORE_CASE,
+        )
 
     private const val NO_A11Y = "Screen control is off. Ask the user to enable 'MySI Agent control' in Accessibility settings."
 

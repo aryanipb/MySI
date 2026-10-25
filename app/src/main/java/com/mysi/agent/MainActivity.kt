@@ -66,8 +66,16 @@ class MainActivity : UiActivity(), Host {
         } else status.text = "Ready · ${Agent.backend} · ${Agent.toolCount} tools"
     }
 
+    override var inFront = false
+
+    override fun onPause() {
+        inFront = false
+        super.onPause()
+    }
+
     override fun onResume() {
         super.onResume()
+        inFront = true
         refreshSetup()
     }
 

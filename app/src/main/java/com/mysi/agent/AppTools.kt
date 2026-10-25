@@ -311,8 +311,26 @@ object AppTools {
                 val url = "https://www.${countryHost(ctx)}/s?k=" + Uri.encode(a.str("query"))
                 val app = listOf("in.amazon.mShop.android.shopping", "com.amazon.mShop.android.shopping").firstOrNull { installed(ctx, it) }
                 val r = Tools.launch(ctx, Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply { app?.let { setPackage(it) } })
-                "$r Showing Amazon results for '${a.str("query")}'. Use read_screen to read prices and titles."
+                if (r.startsWith("Could not")) return@ToolDef r
+                val a11y = AgentAccessibilityService.instance
+                    ?: return@ToolDef "Amazon results are open, but screen control is off so they cannot be read."
+                // Results render progressively; wait until prices are on screen before reading.
+                for (i in 0 until 16) {
+                    if (a11y.screenHas(PRICE)) break
+                    delay(500)
+                }
+                delay(800)
+                "Amazon results for '${a.str("query")}':\n" + a11y.readScreen().take(3000) +
+                    "\nPick one and call amazon_add_to_cart with a few words of its title."
             },
+            ToolDef(
+                "amazon_add_to_cart",
+                "Open a product from the Amazon results on screen and add it to the cart. Stops at the cart; never buys.",
+                listOf(
+                    Param("product", "string", "A few distinctive words from the product title shown in the results; empty if the product page is already open", false),
+                ),
+                confirm = { a -> "Add to your Amazon cart:\n\n${a.str("product").ifBlank { "the product open on screen" }}" },
+            ) { a -> amazonAddToCart(a.str("product")) },
             ToolDef(
                 "youtube_search",
                 "Search YouTube.",
@@ -408,6 +426,40 @@ object AppTools {
             .replace(Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL), " ")
         val text = plain(body)
         return "Title: $title\n${text.take(max)}" + if (text.length > max) " …(truncated)" else ""
+    }
+
+    private val PRICE = Regex("₹\\s?[0-9]|\\$\\s?[0-9]|Rs\\.?\\s?[0-9]")
+    private val ADD_TO_CART = Regex("^add to (cart|basket)$", RegexOption.IGNORE_CASE)
+    private val ADDED = Regex("added to (cart|basket)|item added|go to cart|proceed to buy \\(", RegexOption.IGNORE_CASE)
+
+    private suspend fun amazonAddToCart(product: String): String {
+        val a11y = AgentAccessibilityService.instance ?: return "Screen control is off. Ask the user to enable it."
+        if (a11y.packageOnScreen()?.contains("amazon", true) != true) return "Amazon is not on screen. Use amazon_search first."
+        if (product.isNotBlank()) {
+            // Match on all words so a shortened title still finds the right listing.
+            val words = product.lowercase().split(' ').filter { it.length > 1 }
+            val hit = withContext(Dispatchers.Main) {
+                a11y.findNode { n -> a11y.label(n).lowercase().let { l -> l.length > 10 && words.all { it in l } } }?.let { a11y.click(it) }
+            }
+            if (hit != true) return "No product matching '$product' on screen. Use read_screen and pick words from a visible title."
+            delay(3500)
+        }
+        val title = a11y.findNode { a11y.label(it).length in 25..250 }?.let { a11y.label(it) }.orEmpty()
+        repeat(10) { attempt ->
+            val button = a11y.findNode { ADD_TO_CART.matches(a11y.label(it)) }
+            if (button != null && withContext(Dispatchers.Main) { a11y.click(button) }) {
+                repeat(12) {
+                    delay(500)
+                    if (a11y.screenHas(ADDED)) return "Added to cart: ${title.take(120)}. Not purchased."
+                }
+                return "Tapped Add to Cart for ${title.take(120)}, but Amazon did not confirm. It may ask to choose a size or colour; use read_screen."
+            }
+            if (attempt < 9) {
+                a11y.scroll("down")
+                delay(900)
+            }
+        }
+        return "Could not find an Add to Cart button. The item may be unavailable, need a size or colour, or only offer Buy Now. Use read_screen."
     }
 
     private fun findMedia(ctx: Context, a: Args): Any {

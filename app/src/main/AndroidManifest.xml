@@ -96,6 +96,10 @@
             </intent-filter>
         </service>
 
+        <receiver
+            android:name=".ApprovalReceiver"
+            android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="com.mysi.agent.files"
