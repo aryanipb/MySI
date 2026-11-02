@@ -14,13 +14,34 @@ android {
         targetSdk = 35
         versionCode = 7
         versionName = "0.7"
-        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+    }
+
+    // CI passes the release key through environment variables; local builds fall back to debug.
+    val releaseKeystore = System.getenv("MYSI_KEYSTORE_PATH")
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = System.getenv("MYSI_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("MYSI_KEY_ALIAS")
+                keyPassword = System.getenv("MYSI_KEY_PASSWORD")
+            }
+        }
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = true
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (releaseKeystore != null) "release" else "debug")
         }
     }
     compileOptions {

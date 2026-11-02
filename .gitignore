@@ -6,3 +6,7 @@ local.properties
 .kotlin/
 MySI.apk
 MySI-arm64.apk
+*.apk
+*.aab
+*.jks
+*.keystore

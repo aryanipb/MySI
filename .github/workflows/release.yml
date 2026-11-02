@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Restore signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.MYSI_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || { echo "MYSI_KEYSTORE_BASE64 is not set"; exit 1; }
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+      - name: Build signed APKs
+        env:
+          MYSI_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+          MYSI_KEYSTORE_PASSWORD: ${{ secrets.MYSI_KEYSTORE_PASSWORD }}
+          MYSI_KEY_ALIAS: ${{ secrets.MYSI_KEY_ALIAS }}
+          MYSI_KEY_PASSWORD: ${{ secrets.MYSI_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Name artifacts and write checksums
+        run: |
+          mkdir dist
+          cp app/build/outputs/apk/release/app-arm64-v8a-release.apk "dist/MySI-${GITHUB_REF_NAME}-arm64.apk"
+          cp app/build/outputs/apk/release/app-x86_64-release.apk "dist/MySI-${GITHUB_REF_NAME}-x86_64.apk"
+          cp app/build/outputs/apk/release/app-universal-release.apk "dist/MySI-${GITHUB_REF_NAME}-universal.apk"
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt)
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "MySI $GITHUB_REF_NAME" --generate-notes --verify-tag
