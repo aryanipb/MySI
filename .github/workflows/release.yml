@@ -31,14 +31,11 @@ jobs:
 
       - name: Build signed APKs and Play bundle
         env:
-          MYSI_REPORT_URL: ${{ secrets.MYSI_REPORT_URL }}
           MYSI_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
           MYSI_KEYSTORE_PASSWORD: ${{ secrets.MYSI_KEYSTORE_PASSWORD }}
           MYSI_KEY_ALIAS: ${{ secrets.MYSI_KEY_ALIAS }}
           MYSI_KEY_PASSWORD: ${{ secrets.MYSI_KEY_PASSWORD }}
-        run: |
-          test -n "$MYSI_REPORT_URL" || { echo "MYSI_REPORT_URL is not set"; exit 1; }
-          ./gradlew --no-daemon testReleaseUnitTest assembleRelease bundleRelease
+        run: ./gradlew --no-daemon testReleaseUnitTest assembleRelease bundleRelease
 
       - name: Name artifacts and write checksums
         run: |

@@ -3,7 +3,11 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val reportUrl: String = System.getenv("MYSI_REPORT_URL") ?: (findProperty("mysi.reportUrl") as String?) ?: ""
+// An unset CI secret arrives as an empty string, so blank means "not set" here.
+val reportUrl: String =
+    System.getenv("MYSI_REPORT_URL")?.takeIf { it.isNotBlank() }
+        ?: (findProperty("mysi.reportUrl") as String?)?.takeIf { it.isNotBlank() }
+        ?: ""
 
 android {
     namespace = "com.mysi.agent"
@@ -18,7 +22,7 @@ android {
         versionName = "0.8"
 
         // Google Form pre-filled link that receives in-app AI content reports (Play's AI-Generated
-        // Content policy). Set MYSI_REPORT_URL or -Pmysi.reportUrl=; release-signed builds fail without it.
+        // Content policy), from gradle.properties or MYSI_REPORT_URL; release-signed builds fail without it.
         buildConfigField("String", "REPORT_URL", "\"${reportUrl.replace("\"", "")}\"")
         // Linked inside the app, as Google Play's User Data policy requires.
         buildConfigField("String", "PRIVACY_URL", "\"https://github.com/aryanipb/MySI/blob/main/PRIVACY.md\"")

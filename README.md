@@ -111,12 +111,12 @@ cd MySI
 
 Without release-key environment variables, local builds use your debug key. APKs land in `app/build/outputs/apk/release/`; `./gradlew bundleRelease` makes the Play bundle in `app/build/outputs/bundle/release/`.
 
-In-app AI content reports go to a Google Form. Make a form with short or paragraph questions, then use ⋮ → **Get pre-filled link** and type each question's key as its answer: `category`, `reply`, `details`, `prompt`, `model` and `app_version` (`category` and `reply` are required). Pass that link as `MYSI_REPORT_URL` (or `-Pmysi.reportUrl=`). Builds signed with the release key fail without it. The form must not require sign-in.
+In-app AI content reports go to a Google Form. Make a form with short or paragraph questions, then use ⋮ → **Get pre-filled link** and type each question's key as its answer: `category`, `reply`, `details`, `prompt`, `model` and `app_version` (`category` and `reply` are required). Put that link in `mysi.reportUrl` in `gradle.properties` (or override it with `MYSI_REPORT_URL`). Builds signed with the release key fail without a valid link. The form must not require sign-in.
 
 ## CI/CD
 
 - **CI** runs the unit tests, lints and builds every push and pull request.
-- **Release** runs on any `v*` tag, builds signed APKs and the Play `.aab`, and publishes them to GitHub Releases with SHA-256 checksums. It needs the `MYSI_KEYSTORE_BASE64`, `MYSI_KEYSTORE_PASSWORD`, `MYSI_KEY_ALIAS`, `MYSI_KEY_PASSWORD` and `MYSI_REPORT_URL` secrets.
+- **Release** runs on any `v*` tag, builds signed APKs and the Play `.aab`, and publishes them to GitHub Releases with SHA-256 checksums. It needs the `MYSI_KEYSTORE_BASE64`, `MYSI_KEYSTORE_PASSWORD`, `MYSI_KEY_ALIAS` and `MYSI_KEY_PASSWORD` secrets.
 
 ## Project layout
 
