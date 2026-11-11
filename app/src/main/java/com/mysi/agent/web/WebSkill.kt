@@ -53,9 +53,6 @@ object WebSkill {
             service ?: WebService(http, Downloader(File(Storage.workspace(ctx), "Downloads"))).also { service = it }
         }
 
-    /** Without a workspace (for callers with no Context): documents are reported, not saved. */
-    val basic: WebService by lazy { WebService(http, null) }
-
     /** Forgets cached pages and searches; call when a new chat starts. */
     fun newSession() {
         service?.clearCache()
@@ -69,7 +66,7 @@ object WebSkill {
             keywords = listOf(
                 "search", "google", "internet", "web", "website", "online", "link", "url", "http", "www", "page", "article", "news",
                 "headline", "latest", "today", "current", "weather", "forecast", "temperature", "rain", "currency", "exchange rate",
-                "convert", "dollar", "rupee", "euro", "wikipedia", "who is", "what is", "research", "sources", "report", "download", "pdf link",
+                "convert", "dollar", "rupee", "euro", "wikipedia", "who is", "what is", "research", "sources", "download",
             ),
             instructions =
                 """
@@ -88,7 +85,8 @@ object WebSkill {
     private fun maxChars(n: Int) = n.coerceIn(500, WebService.OUTPUT_BUDGET)
 
     fun tools(ctx: Context): List<ToolDef> {
-        val web = service(ctx)
+        // Resolved on first use, so building the tool list (for routing) touches no files.
+        val web by lazy { service(ctx) }
         return listOf(
             ToolDef(
                 "search_internet",

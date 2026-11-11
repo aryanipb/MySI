@@ -1,9 +1,10 @@
 package com.mysi.agent.skills
 
 import android.content.Context
-import android.content.ContextWrapper
 import com.mysi.agent.Args
 import com.mysi.agent.Skill
+import com.mysi.agent.Skills
+import com.mysi.agent.TestContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -11,15 +12,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SkillCatalogTest {
-    /**
-     * Building the tool lists only stores the Context in lambdas, so an uninitialised instance
-     * is enough; nothing here touches the Android framework.
-     */
-    private val ctx: Context by lazy {
-        val f = Class.forName("sun.misc.Unsafe").getDeclaredField("theUnsafe").apply { isAccessible = true }
-        val unsafe = f.get(null)
-        unsafe.javaClass.getMethod("allocateInstance", Class::class.java).invoke(unsafe, ContextWrapper::class.java) as Context
-    }
+    private val ctx: Context get() = TestContext.unsafe
 
     private val skills: List<Skill> = listOf(DocumentsSkill.skill, KnowledgeSkill.skill, DataSkill.skill, MemorySkill.skill, PlannerSkill.skill)
 
@@ -37,8 +30,17 @@ class SkillCatalogTest {
         assertEquals(expected, skills.associate { s -> s.name to tools(s).map { it.name } })
         val all = skills.flatMap { tools(it) }.map { it.name }
         assertEquals(all.size, all.toSet().size)
-        // create_pdf stays in the core tools; the packs must not duplicate it.
+        // create_pdf is a built-in tool; the pack must not define a second one.
         assertFalse("create_pdf" in all)
+    }
+
+    @Test
+    fun theRegisteredDocumentsSkillAddsTheBuiltInPdfWriter() {
+        val registered = Skills.named("documents")!!
+        assertEquals(DocumentsSkill.skill.instructions, registered.instructions)
+        assertEquals(tools(DocumentsSkill.skill).map { it.name } + "create_pdf", tools(registered).map { it.name })
+        // Every pack is registered under its own name.
+        for (s in skills) assertNotNull(s.name, Skills.named(s.name))
     }
 
     @Test

@@ -13,7 +13,8 @@ import kotlinx.coroutines.withContext
 
 /**
  * App-level skills: hand files and text to WhatsApp, email and social apps through Android's
- * share system, search the web in the background, and open shopping, video, map and ride apps.
+ * share system, open a page or a search in Chrome or the Google app, and open shopping, video,
+ * map and ride apps. Background web search and reading live in the web skill (web/WebSkill.kt).
  *
  * MySI never operates another app's screen. Every hand-off opens the other app with the content
  * filled in, and the user makes the final tap (Send, Post, Book, Pay).
@@ -201,25 +202,7 @@ object AppTools {
                 val viaApp = pkg != null && installed(ctx, pkg)
                 Tools.launch(ctx, Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply { if (viaApp) setPackage(pkg) })
             },
-            // ---------- internet (search_internet and read_web_page run in the background) ----------
-            ToolDef(
-                "search_internet",
-                "Search the internet in the background and get result titles, links and snippets without opening any app. Use read_web_page to read a result.",
-                listOf(
-                    Param("query", "string", "What to search for"),
-                    Param("count", "integer", "How many results, default 6", false),
-                ),
-                outbound = true,
-            ) { a -> Web.search(a.str("query"), a.int("count", 6).coerceIn(1, 15)) },
-            ToolDef(
-                "read_web_page",
-                "Download a web page in the background and return its readable text.",
-                listOf(
-                    Param("url", "string", "Page address"),
-                    Param("max_chars", "integer", "How much text to return, default 3000", false),
-                ),
-                outbound = true,
-            ) { a -> Web.read(a.str("url"), a.int("max_chars", 3000).coerceIn(500, 3400)) },
+            // ---------- browser on screen (the web skill reads pages in the background) ----------
             ToolDef(
                 "open_in_chrome",
                 "Open a web address, or a Google search for any text, in Chrome on screen.",

@@ -21,6 +21,7 @@ object DocumentsSkill {
         keywords = listOf(
             "document", "pdf", "word", "docx", "excel", "xlsx", "spreadsheet", "powerpoint", "pptx", "slides", "csv",
             "markdown", "file", "page", "read", "summarise", "summarize", "report", "letter", "contract", "resume", "invoice",
+            "save", "create",
         ),
         instructions = """
             Documents: get a path from pick_files or list_files first. For a file you have not seen, call document_info, then read_document one page at a time; never describe content you have not read.
