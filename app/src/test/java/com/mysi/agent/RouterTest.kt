@@ -68,6 +68,19 @@ class RouterTest {
         case("pick a photo and send it to Rahul on WhatsApp", listOf("communication"), "pick_files", "whatsapp_files"),
         case("email the report to boss@example.com", listOf("communication"), "compose_email"),
         case("call dad", listOf("communication"), "dial_number"),
+        // vision
+        case("what is in this photo", listOf("vision"), "look_at_image"),
+        case("how many people are in the picture I pick", listOf("vision"), "pick_files", "detect_objects"),
+        case("count the cars in this image", listOf("vision"), "detect_objects"),
+        case("read the text in this receipt photo", listOf("vision"), "read_text_in_image"),
+        case("describe the picture I took", listOf("vision"), "look_at_image"),
+        // hearing
+        case("transcribe this recording", listOf("hearing"), "transcribe_audio"),
+        case("record a voice note and summarise it", listOf("hearing"), "record_audio", "listen_to_audio"),
+        case("what sound is this", listOf("hearing"), "identify_sounds"),
+        case("listen to the audio file I pick and tell me what they decided", listOf("hearing"), "pick_files", "listen_to_audio"),
+        case("what is that noise in the recording", listOf("hearing"), "identify_sounds"),
+        case("write down what was said in the meeting recording", listOf("hearing"), "transcribe_audio"),
         // device and the rest
         case("how much battery is left?", listOf("device"), "device_status"),
         case("turn on the flashlight", listOf("device"), "flashlight"),
