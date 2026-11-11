@@ -1,5 +1,8 @@
 package com.mysi.agent.skills.core
 
+import java.time.Instant
+import java.time.ZoneId
+
 /** A document in the knowledge base. */
 data class KbDoc(val id: Long, val name: String, val path: String, val type: String, val chunks: Int, val chars: Long, val added: Long)
 
@@ -52,7 +55,23 @@ class KnowledgeBase(private val store: KbStore, private val clock: () -> Long = 
         return Added(name, chunks.size, existing != null)
     }
 
-    fun list(): List<KbDoc> = store.documents().sortedBy { it.name.lowercase() }
+    fun list(): List<KbDoc> = store.documents().sortedWith(compareBy<KbDoc> { it.name.lowercase() }.thenBy { it.id })
+
+    /** kb_list's answer from [offset], within the result budget, with the offset of the next page. */
+    fun listText(offset: Int, zone: ZoneId): String {
+        val docs = list()
+        if (docs.isEmpty()) return "The knowledge base is empty. Add files with kb_add."
+        val start = offset.coerceAtLeast(0)
+        if (start >= docs.size) return "The knowledge base has only ${docs.size} documents."
+        val lines = docs.drop(start).map { d ->
+            val day = Instant.ofEpochMilli(d.added).atZone(zone).toLocalDate()
+            "- ${d.name} (${d.type}, ${d.chunks} passages, added $day)"
+        }
+        val n = Budget.fit(lines, Budget.CHARS - 120)
+        val head = if (start == 0 && n == docs.size) "${docs.size} document${if (docs.size == 1) "" else "s"}:" else "Documents ${start + 1}-${start + n} of ${docs.size}:"
+        val text = head + "\n" + lines.take(n).joinToString("\n")
+        return if (start + n < docs.size) "$text\n[More: kb_list(offset=${start + n})]" else text
+    }
 
     /** Removes a document by exact name, or by a unique case-insensitive match. */
     fun remove(name: String): String? {
@@ -134,8 +153,31 @@ class MemoryBook(private val store: MemoryStore, private val clock: () -> Long =
         return Bm25Ranker(index).rank(query, count.coerceIn(1, 20)).filter { it.score > 0 }.mapNotNull { byId[it.id] }
     }
 
+    /** Newest change first; ties by number, so paging by offset is stable. */
     fun list(offset: Int = 0, limit: Int = 50): List<MemoryItem> =
-        store.all().sortedByDescending { it.updated }.drop(offset.coerceAtLeast(0)).take(limit.coerceIn(1, 200))
+        store.all().sortedWith(compareByDescending<MemoryItem> { it.updated }.thenByDescending { it.id })
+            .drop(offset.coerceAtLeast(0)).take(limit.coerceIn(1, 200))
+
+    /** One page for list_memories, within the result budget, with the offset of the next page. */
+    fun page(offset: Int): String {
+        val total = count()
+        if (total == 0) return "No memories saved yet."
+        val start = offset.coerceAtLeast(0)
+        if (start >= total) return "There are only $total memories."
+        val lines = list(start, PAGE).map { line(it) }
+        val n = Budget.fit(lines, Budget.CHARS - 120)
+        val text = "Memories ${start + 1}-${start + n} of $total:\n" + lines.take(n).joinToString("\n")
+        return if (start + n < total) "$text\n[More: list_memories(offset=${start + n})]" else text
+    }
+
+    /** recall's answer, within the result budget. */
+    fun recallText(query: String, count: Int): String {
+        val found = recall(query, count)
+        if (found.isEmpty()) return "No saved memory matches '${query.trim()}'."
+        val lines = found.map { line(it) }
+        val n = Budget.fit(lines, Budget.CHARS - 100)
+        return lines.take(n).joinToString("\n") + if (n < found.size) "\n(${found.size - n} more matches not shown; ask a narrower question.)" else ""
+    }
 
     fun count() = store.all().size
 
@@ -152,8 +194,10 @@ class MemoryBook(private val store: MemoryStore, private val clock: () -> Long =
     companion object {
         const val MAX_CHARS = 500
         const val MAX_COUNT = 2_000
+        const val PAGE = 30
 
-        fun format(items: List<MemoryItem>): String =
-            items.joinToString("\n") { "#${it.id} [${it.topic}] ${it.text}" }
+        fun line(m: MemoryItem) = "#${m.id} [${m.topic}] ${m.text}"
+
+        fun format(items: List<MemoryItem>): String = items.joinToString("\n") { line(it) }
     }
 }

@@ -9,8 +9,6 @@ import com.mysi.agent.skills.core.MemoryItem
 
 /** Facts the user asked MySI to keep. Every save and every deletion is approved by the user. */
 object MemorySkill {
-    private const val PAGE = 30
-
     val skill = Skill(
         name = "memory",
         description = "Remember facts the user wants kept, such as preferences, people and details, and recall them in later chats.",
@@ -64,31 +62,13 @@ object MemorySkill {
                 Param("count", "integer", "How many, 1-20. Default 5", false),
             ),
             privateData = true,
-        ) { a ->
-            SkillFiles.io {
-                val found = book(ctx).recall(a.str("query"), a.int("count", 5))
-                if (found.isEmpty()) "No saved memory matches '${a.str("query").trim()}'." else MemoryBook.format(found)
-            }
-        },
+        ) { a -> SkillFiles.io { book(ctx).recallText(a.str("query"), a.int("count", 5)) } },
         ToolDef(
             "list_memories",
-            "List the memories MySI has saved, newest first, $PAGE at a time with their numbers. Use offset to see more.",
-            listOf(Param("offset", "integer", "How many to skip. Default 0", false)),
+            "List the memories MySI has saved, newest first, with their numbers; a long list ends with the offset for the next page.",
+            listOf(Param("offset", "integer", "How many to skip, from the previous page. Default 0", false)),
             privateData = true,
-        ) { a ->
-            SkillFiles.io {
-                val b = book(ctx)
-                val total = b.count()
-                val offset = a.int("offset", 0).coerceAtLeast(0)
-                val page = b.list(offset, PAGE)
-                when {
-                    total == 0 -> "No memories saved yet."
-                    page.isEmpty() -> "There are only $total memories."
-                    else -> "Memories ${offset + 1}-${offset + page.size} of $total:\n" + MemoryBook.format(page) +
-                        if (offset + page.size < total) "\n[More: list_memories(offset=${offset + page.size})]" else ""
-                }
-            }
-        },
+        ) { a -> SkillFiles.io { book(ctx).page(a.int("offset", 0)) } },
         ToolDef(
             "forget",
             "Delete one saved memory by its number from recall or list_memories; the user is asked to approve it. Example: forget(id=12).",

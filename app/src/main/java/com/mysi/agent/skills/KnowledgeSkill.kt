@@ -5,12 +5,12 @@ import com.mysi.agent.Param
 import com.mysi.agent.Skill
 import com.mysi.agent.Storage
 import com.mysi.agent.ToolDef
+import com.mysi.agent.skills.core.Budget
 import com.mysi.agent.skills.core.Documents
 import com.mysi.agent.skills.core.KnowledgeBase
 import java.io.File
 import java.io.IOException
-import java.text.DateFormat
-import java.util.Date
+import java.time.ZoneId
 
 /** A local, searchable index of the user's documents, stored in SQLite on the phone. */
 object KnowledgeSkill {
@@ -42,24 +42,16 @@ object KnowledgeSkill {
         ) { a -> SkillFiles.io { add(ctx, a.str("paths")) } },
         ToolDef(
             "kb_list",
-            "List the documents in the local knowledge base with their size and when they were added.",
+            "List the documents in the local knowledge base with their size and when they were added; a long list ends with the offset for the next page.",
+            listOf(Param("offset", "integer", "How many to skip, from the previous page. Default 0", false)),
             privateData = true,
-        ) {
-            SkillFiles.io {
-                val docs = kb(ctx).list()
-                if (docs.isEmpty()) "The knowledge base is empty. Add files with kb_add."
-                else {
-                    val fmt = DateFormat.getDateInstance(DateFormat.MEDIUM)
-                    "${docs.size} document${if (docs.size == 1) "" else "s"}:\n" +
-                        docs.take(100).joinToString("\n") { "- ${it.name} (${it.type}, ${it.chunks} passages, added ${fmt.format(Date(it.added))})" }
-                }
-            }
-        },
+        ) { a -> SkillFiles.io { kb(ctx).listText(a.int("offset", 0), ZoneId.systemDefault()) } },
         ToolDef(
             "kb_remove",
             "Remove a document from the local knowledge base by its name as kb_list shows it. The original file is not touched.",
             listOf(Param("name", "string", "Document name from kb_list")),
             confirm = { a -> "Remove ${a.str("name").trim()} from the knowledge base?" },
+            privateData = true,
         ) { a ->
             SkillFiles.io {
                 val removed = kb(ctx).remove(a.str("name").trim())
@@ -113,6 +105,9 @@ object KnowledgeSkill {
             }
         }
         if (files.size > MAX_FILES_PER_CALL) lines += "Only the first $MAX_FILES_PER_CALL files were added; call kb_add again for the rest."
-        return (lines + problems).joinToString("\n").ifEmpty { "No supported documents found." }
+        val all = lines + problems
+        if (all.isEmpty()) return "No supported documents found."
+        val n = Budget.fit(all, Budget.CHARS - 100)
+        return all.take(n).joinToString("\n") + if (n < all.size) "\n(${all.size - n} more results not shown; kb_list shows what is indexed.)" else ""
     }
 }

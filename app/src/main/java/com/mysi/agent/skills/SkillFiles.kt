@@ -21,7 +21,7 @@ internal object SkillFiles {
     /** A readable file the model named, or null when it is outside the sandbox or missing. */
     fun file(ctx: Context, path: String): File? = Storage.resolve(ctx, path)?.takeIf { it.isFile }
 
-    fun missing(path: String) = "No file at '${path.trim()}'. $NOT_ALLOWED"
+    fun missing(path: String) = "No file at '${path.trim().take(200)}'. $NOT_ALLOWED"
 
     /** Paths separated by commas or new lines; a single path that contains a comma still works. */
     fun paths(ctx: Context, text: String): List<String> {

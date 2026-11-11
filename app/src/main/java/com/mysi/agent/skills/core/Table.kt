@@ -599,14 +599,17 @@ object Stats {
         return sb.toString().trim()
     }
 
-    /** Columns with types and ranges, plus sample rows, for table_info. */
+    /**
+     * Columns with types and ranges, plus sample rows, for table_info. A very wide table lists as
+     * many columns as fit and says how many more there are.
+     */
     fun info(table: Table, maxChars: Int = 2_800): String {
         val sb = StringBuilder()
-        sb.append("Table '${table.name}': ${table.rows.size} data rows, ${table.columns.size} columns")
-        if (table.sheets.size > 1) sb.append(" (sheets: ${table.sheets.joinToString(", ")})")
+        sb.append("Table '${table.name.take(120)}': ${table.rows.size} data rows, ${table.columns.size} columns")
+        if (table.sheets.size > 1) sb.append(" (sheets: ${table.sheets.joinToString(", ").take(400)})")
         sb.append("\n")
         table.warnings.forEach { sb.append("Note: $it\n") }
-        table.columns.forEachIndexed { i, name ->
+        val lines = table.columns.mapIndexed { i, name ->
             val cells = table.rows.map { it[i] }
             val type = Values.infer(cells)
             val filled = cells.filter { it.isNotBlank() }
@@ -617,10 +620,20 @@ object Stats {
                 else -> "${filled.map { it.lowercase() }.toSet().size} distinct, e.g. ${filled.first().take(40)}"
             }
             val missing = cells.size - filled.size
-            sb.append("- ${name}: ${type.label}, $detail${if (missing > 0 && type != ColType.EMPTY) ", $missing empty" else ""}\n")
+            "- ${name.take(80)}: ${type.label}, $detail${if (missing > 0 && type != ColType.EMPTY) ", $missing empty" else ""}"
         }
-        if (table.rows.isNotEmpty()) {
-            sb.append("First rows:\n").append(table.columns.joinToString(" | ")).append('\n')
+        val n = Budget.fit(lines, maxChars - sb.length - 600)
+        lines.take(n).forEach { sb.append(it).append('\n') }
+        if (n < lines.size) {
+            // Name the rest so table_query and table_stats can still use them.
+            val rest = table.columns.drop(n).joinToString(", ") { it.take(40) }
+            val room = (maxChars - sb.length - 60).coerceAtLeast(0)
+            sb.append("Other columns (${lines.size - n}): ").append(if (rest.length > room) rest.take(room).substringBeforeLast(", ") + ", …" else rest).append('\n')
+        }
+        val header = table.columns.joinToString(" | ") { it.take(40) }
+        // Sample rows only with their header, and only when both fit.
+        if (table.rows.isNotEmpty() && sb.length + header.length + 20 < maxChars) {
+            sb.append("First rows:\n").append(header).append('\n')
             for (r in table.rows.take(3)) {
                 val line = r.joinToString(" | ") { it.take(40) } + "\n"
                 if (sb.length + line.length > maxChars) break

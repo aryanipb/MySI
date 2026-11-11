@@ -6,6 +6,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.ZoneOffset
 
 class DateException(message: String) : Exception(message)
 
@@ -156,16 +157,20 @@ class Planner(private val store: PlannerStore, private val zone: () -> ZoneId = 
         return "Task #$id added: $t" + (w?.let { " (due ${it})" } ?: "")
     }
 
-    fun listTasks(status: String): String {
+    /** Tasks from [offset], within the result budget, with the offset of the next page. */
+    fun listTasks(status: String, offset: Int = 0): String {
         val all = store.tasks()
-        val chosen = when (status.trim().lowercase()) {
-            "done", "completed" -> all.filter { it.done }.sortedByDescending { it.completed ?: 0 }
+        val wanted = status.trim().lowercase().ifEmpty { "open" }
+        val chosen = when (wanted) {
+            "done", "completed" -> all.filter { it.done }.sortedWith(compareByDescending<Task> { it.completed ?: 0 }.thenByDescending { it.id })
             "all" -> all.sortedWith(compareBy<Task> { it.done }.thenBy { it.due ?: Long.MAX_VALUE }.thenBy { it.id })
             else -> all.filter { !it.done }.sortedWith(compareBy<Task> { it.due ?: Long.MAX_VALUE }.thenBy { it.id })
         }
-        if (chosen.isEmpty()) return if (all.isEmpty()) "No tasks yet." else "No tasks with status '${status.ifBlank { "open" }}'."
+        if (chosen.isEmpty()) return if (all.isEmpty()) "No tasks yet." else "No tasks with status '$wanted'."
+        val start = offset.coerceAtLeast(0)
+        if (start >= chosen.size) return "There are only ${chosen.size} $wanted tasks."
         val nowMs = clock()
-        val lines = chosen.take(50).map { t ->
+        val lines = chosen.drop(start).map { t ->
             val due = t.due?.let { ms ->
                 val dt = LocalDateTime.ofInstant(Instant.ofEpochMilli(ms), zone())
                 val text = if (t.dueHasTime) "%s %02d:%02d".format(dt.toLocalDate(), dt.hour, dt.minute) else dt.toLocalDate().toString()
@@ -174,7 +179,9 @@ class Planner(private val store: PlannerStore, private val zone: () -> ZoneId = 
             } ?: ""
             "#${t.id} ${if (t.done) "[done] " else ""}${t.title}$due"
         }
-        return lines.joinToString("\n") + if (chosen.size > 50) "\n(${chosen.size - 50} more not shown)" else ""
+        val n = Budget.fit(lines, Budget.CHARS - 100)
+        val text = lines.take(n).joinToString("\n")
+        return if (start + n < chosen.size) "$text\n[More: list_tasks(status=$wanted, offset=${start + n})]" else text
     }
 
     fun complete(id: Long): String {
@@ -223,9 +230,10 @@ class Planner(private val store: PlannerStore, private val zone: () -> ZoneId = 
             val e = end.trim().takeIf { it.isNotEmpty() }?.let { DateText.parse(it, now()) }
             val lastDay = e?.date ?: s.date
             if (lastDay.isBefore(s.date)) throw IllegalArgumentException("The event ends before it starts.")
-            // All-day: from local midnight to the midnight after the last day, as calendar apps expect.
-            val startMs = s.date.atStartOfDay(z).toInstant().toEpochMilli()
-            val endMs = lastDay.plusDays(1).atStartOfDay(z).toInstant().toEpochMilli()
+            // All-day events use UTC midnight boundaries (CalendarContract.Events: eventTimezone UTC,
+            // times on a midnight boundary), ending at the midnight after the last day.
+            val startMs = s.date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+            val endMs = lastDay.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
             return EventTimes(startMs, endMs, true, if (lastDay == s.date) "${s.date} (all day)" else "${s.date} to $lastDay (all day)")
         }
         val startMs = s.at(z)

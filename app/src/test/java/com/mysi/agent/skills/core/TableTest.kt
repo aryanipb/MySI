@@ -186,6 +186,17 @@ class TableTest {
     }
 
     @Test
+    fun wideTablesStillFitAndNameEveryColumn() {
+        val header = (1..400).joinToString(",") { "Measurement column number $it" }
+        val row = (1..400).joinToString(",") { "$it" }
+        val t = TableLoader.load(TestFiles.write(dir, "wide.csv", "$header\n$row\n$row"), null)
+        val info = Stats.info(t)
+        assertTrue("${info.length}", info.length <= 2_800)
+        assertTrue(info, info.contains("- Measurement column number 1: number"))
+        assertTrue(info, info.contains("Other columns ("))
+    }
+
+    @Test
     fun hugeTablesAreCapped() {
         val f = java.io.File(dir, "huge.csv")
         f.bufferedWriter().use { w -> w.write("a,b\n"); repeat(50_000) { w.write("$it,${it * 2}\n") } }

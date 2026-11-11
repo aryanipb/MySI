@@ -67,6 +67,24 @@ data class ReadLimits(
     val zip: ZipLimits = ZipLimits(),
 )
 
+/**
+ * Tool results must fit the runtime's cap of about 3,500 characters, which cuts silently. Lists
+ * therefore stop at whole lines within [CHARS] and say how to get the rest.
+ */
+object Budget {
+    const val CHARS = 3_000
+
+    /** How many of [lines] fit in [max] characters joined by new lines; at least one when any exist. */
+    fun fit(lines: List<String>, max: Int = CHARS): Int {
+        var used = 0
+        lines.forEachIndexed { i, line ->
+            used += line.length + 1
+            if (used > max) return maxOf(i, 1)
+        }
+        return lines.size
+    }
+}
+
 /** A paragraph-level block of text; [heading] is 1-6 for headings and 0 for body text. */
 data class Block(val text: String, val heading: Int = 0)
 

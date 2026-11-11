@@ -38,14 +38,18 @@ object PlannerSkill {
         ) { a -> SkillFiles.io { planner(ctx).addTask(a.str("title"), a.str("due")) } },
         ToolDef(
             "list_tasks",
-            "List the user's local tasks with their numbers and due dates, soonest first; overdue tasks are marked.",
-            listOf(Param("status", "string", "Which tasks. Default open", false, listOf("open", "done", "all"))),
+            "List the user's local tasks with their numbers and due dates, soonest first; overdue tasks are marked and a long list ends with the offset for the next page.",
+            listOf(
+                Param("status", "string", "Which tasks. Default open", false, listOf("open", "done", "all")),
+                Param("offset", "integer", "How many to skip, from the previous page. Default 0", false),
+            ),
             privateData = true,
-        ) { a -> SkillFiles.io { planner(ctx).listTasks(a.str("status", "open")) } },
+        ) { a -> SkillFiles.io { planner(ctx).listTasks(a.str("status", "open"), a.int("offset", 0)) } },
         ToolDef(
             "complete_task",
             "Mark a task as done by its number from list_tasks. Example: complete_task(id=4).",
             listOf(Param("id", "integer", "Task number")),
+            privateData = true,
         ) { a -> SkillFiles.io { planner(ctx).complete(a.int("id", -1).toLong()) } },
         ToolDef(
             "add_note",

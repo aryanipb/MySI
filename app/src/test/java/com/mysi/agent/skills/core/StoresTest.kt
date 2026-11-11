@@ -90,6 +90,58 @@ class StoresTest {
         assertEquals(listOf("b.txt", "a.txt"), kb.search("anything", 5).map { it.document })
     }
 
+    // ---------- result budgets (the runtime cuts results near 3,500 characters) ----------
+
+    private val cap = 3_500
+
+    /** Follows every "[More: ...(offset=N)]" link and returns all pages. */
+    private fun pages(first: String, next: (Int) -> String): List<String> {
+        val out = mutableListOf(first)
+        while (true) {
+            val m = Regex("offset=(\\d+)\\)]$").find(out.last()) ?: return out
+            out += next(m.groupValues[1].toInt())
+        }
+    }
+
+    @Test
+    fun memoryListsPageWithinTheCapWithoutSkippingAnything() {
+        val book = MemoryBook(FakeMemoryStore())
+        repeat(100) { i -> book.remember("Fact $i: " + "x".repeat(MemoryBook.MAX_CHARS - 10), "topic$i") }
+        val all = pages(book.page(0)) { book.page(it) }
+        assertTrue(all.size > 3)
+        for (p in all) assertTrue("${p.length}", p.length <= cap)
+        val ids = all.flatMap { p -> Regex("^#(\\d+) ", RegexOption.MULTILINE).findAll(p).map { it.groupValues[1].toInt() }.toList() }
+        assertEquals((1..100).toSet(), ids.toSet())
+        assertEquals(100, ids.size)
+        val recall = book.recallText("fact", 20)
+        assertTrue("${recall.length}", recall.length <= cap)
+        assertTrue(recall, recall.endsWith("more matches not shown; ask a narrower question.)"))
+    }
+
+    @Test
+    fun taskListsPageWithinTheCap() {
+        val p = Planner(FakePlannerStore(), { zone }, { clockMs })
+        repeat(120) { i -> p.addTask("Task $i " + "y".repeat(180), "2026-12-${(i % 28 + 1).toString().padStart(2, '0')} 10:00") }
+        val all = pages(p.listTasks("open")) { p.listTasks("open", it) }
+        assertTrue(all.size > 3)
+        for (page in all) assertTrue("${page.length}", page.length <= cap)
+        assertEquals(120, all.sumOf { page -> page.lines().count { it.startsWith("#") } })
+        assertTrue(all.first().lines().last().startsWith("[More: list_tasks(status=open, offset="))
+        assertTrue(p.listTasks("open", 999).startsWith("There are only 120 open tasks"))
+    }
+
+    @Test
+    fun knowledgeBaseListPagesWithinTheCap() {
+        val kb = KnowledgeBase(FakeKbStore()) { clockMs }
+        repeat(150) { i -> kb.add("Document $i " + "z".repeat(100) + ".pdf", "/d/$i", DocType.PDF, listOf(Part("page 1", "text $i"))) }
+        val all = pages(kb.listText(0, zone)) { kb.listText(it, zone) }
+        assertTrue(all.size > 3)
+        for (page in all) assertTrue("${page.length}", page.length <= cap)
+        assertEquals(150, all.sumOf { page -> page.lines().count { it.startsWith("- Document") } })
+        assertTrue(all.first(), all.first().contains("added 2026-11-11"))
+        assertEquals("The knowledge base is empty. Add files with kb_add.", KnowledgeBase(FakeKbStore()).listText(0, zone))
+    }
+
     // ---------- memory ----------
 
     @Test
@@ -237,8 +289,9 @@ class StoresTest {
         assertEquals(start + 2 * 60 * 60_000, p.eventTimes("2026-11-14 10:30", "in 2 hours").end)
         val allDay = p.eventTimes("2026-11-14", "2026-11-15")
         assertTrue(allDay.allDay)
-        assertEquals(LocalDate.of(2026, 11, 14).atStartOfDay(zone).toInstant().toEpochMilli(), allDay.start)
-        assertEquals(LocalDate.of(2026, 11, 16).atStartOfDay(zone).toInstant().toEpochMilli(), allDay.end)
+        // All-day events sit on UTC midnight boundaries, as CalendarContract stores them.
+        assertEquals(LocalDate.of(2026, 11, 14).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli(), allDay.start)
+        assertEquals(LocalDate.of(2026, 11, 16).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli(), allDay.end)
         assertEquals("2026-11-14 to 2026-11-15 (all day)", allDay.description)
         for ((s, e) in listOf("2026-11-14 10:30" to "09:00", "2026-11-14" to "2026-11-13", "" to "")) {
             try {

@@ -85,10 +85,10 @@ object DocumentsSkill {
         },
         ToolDef(
             "create_docx",
-            "Create a Word document (.docx) from text. In body, start lines with # for headings, - for bullets, 1. for numbered steps and | for table rows; **bold** works. Example: create_docx(title='Leave letter', body='Dear Sir,\n\n...').",
+            "Create a Word document (.docx) with headings, lists and tables from text. Example: create_docx(title='Leave letter', body='Dear Sir,\n\nI request leave from 12 to 14 November.').",
             listOf(
                 Param("title", "string", "Document title, shown at the top"),
-                Param("body", "string", "Full text; blank lines between paragraphs"),
+                Param("body", "string", "Full text with blank lines between paragraphs; lines starting # are headings, - bullets, 1. numbered steps and | table rows; **bold** works"),
                 Param("filename", "string", "File name without extension. Default: the title", false),
             ),
             confirm = { a -> SkillFiles.overwriteQuestion(ctx, FileNames.safe(a.str("filename"), a.str("title"), "docx")) },
@@ -103,10 +103,10 @@ object DocumentsSkill {
         },
         ToolDef(
             "create_xlsx",
-            "Create an Excel workbook (.xlsx). Write each sheet as a line '## Sheet name' followed by comma-separated rows, header row first; numbers, YYYY-MM-DD dates and =SUM(B2:B9) formulas become real cells. Example: sheets='## Sales\nMonth,Amount\nJan,1200\nFeb,950'.",
+            "Create an Excel workbook (.xlsx) with one or more sheets of rows. Example: create_xlsx(filename='budget', sheets='## Sales\nMonth,Amount\nJan,1200\nFeb,950').",
             listOf(
                 Param("filename", "string", "File name without extension"),
-                Param("sheets", "string", "Sheets as '## Name' lines followed by CSV rows"),
+                Param("sheets", "string", "Each sheet is a line '## Sheet name' then comma-separated rows, header first; numbers, YYYY-MM-DD dates and =SUM(B2:B9) formulas become real cells"),
             ),
             confirm = { a -> SkillFiles.overwriteQuestion(ctx, FileNames.safe(a.str("filename"), "workbook", "xlsx")) },
         ) { a ->

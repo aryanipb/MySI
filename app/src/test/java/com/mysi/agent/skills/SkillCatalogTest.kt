@@ -49,16 +49,33 @@ class SkillCatalogTest {
             assertTrue(s.name, s.instructions.length in 100..900)
             for (t in tools(s)) {
                 assertTrue("${t.name}: ${t.description.length}", t.description.length in 40..330)
+                assertTrue("${t.name} has more than two sentences", sentences(t.description) <= 2)
                 assertTrue(t.name, t.params.all { it.description.isNotBlank() })
             }
         }
+    }
+
+    /** Sentence ends outside quoted examples, brackets and abbreviations like e.g. */
+    private fun sentences(text: String): Int {
+        val plain = text.replace(Regex("'[^']*'|\\([^)]*\\)"), "").replace("e.g.", "eg").replace("i.e.", "ie")
+        return Regex("[.!?](\\s|$)").findAll(plain).count()
+    }
+
+    @Test
+    fun sentenceCounterWorks() {
+        assertEquals(2, sentences("Read a file one page at a time. Example: read_document(path, page=2)."))
+        assertEquals(3, sentences("One. Two. Three."))
+        assertEquals(1, sentences("Save a note, e.g. an idea (or a list. really)."))
     }
 
     @Test
     fun nothingIsOutboundAndReadersArePrivate() {
         val all = skills.flatMap { tools(it) }.associateBy { it.name }
         assertTrue(all.values.none { it.outbound })
-        val readers = listOf("read_document", "document_info", "search_document", "kb_add", "kb_list", "kb_search", "table_info", "table_query", "table_stats", "recall", "list_memories", "list_tasks", "search_notes")
+        val readers = listOf(
+            "read_document", "document_info", "search_document", "kb_add", "kb_list", "kb_remove", "kb_search", "table_info",
+            "table_query", "table_stats", "recall", "list_memories", "list_tasks", "complete_task", "search_notes",
+        )
         for (r in readers) assertTrue(r, all.getValue(r).privateData)
         assertFalse(all.getValue("calculate").privateData)
     }
