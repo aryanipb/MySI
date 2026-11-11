@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <external-files-path name="pictures" path="Pictures/" />
-    <!-- Lets the agent hand any file on shared storage to WhatsApp, Gmail, Instagram, etc. -->
-    <external-path name="storage" path="." />
+    <!-- Only the agent's own workspace and copies of files the user picked are shareable. -->
+    <files-path name="workspace" path="workspace/" />
+    <cache-path name="picked" path="picked/" />
 </paths>

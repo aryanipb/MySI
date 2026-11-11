@@ -4,7 +4,7 @@
 
 ### The AI agent that lives on your phone, not in someone else's cloud.
 
-Tell it what you want. It runs a local model, opens your apps, reads the screen, taps, types and gets it done.
+Tell it what you want. It runs a local model, searches the web, and opens your apps with everything ready for your final tap.
 
 [![CI](https://github.com/aryanipb/MySI/actions/workflows/ci.yml/badge.svg)](https://github.com/aryanipb/MySI/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/aryanipb/MySI?label=download%20apk)](https://github.com/aryanipb/MySI/releases/latest)
@@ -18,24 +18,24 @@ Tell it what you want. It runs a local model, opens your apps, reads the screen,
 
 ## Why MySI
 
-Phone assistants answer questions. MySI **does the task**. And unlike cloud agents, its brain runs on the phone, so your messages, contacts and screen are never sent to an LLM provider.
+Phone assistants answer questions. MySI **gets things ready**. And unlike cloud agents, its brain runs on the phone, so your messages and contacts are never sent to an LLM provider.
 
 | | |
 |---|---|
 | 🧠 **On-device inference** | Gemma 4 on Google's LiteRT-LM, GPU first with CPU fallback. No LLM API, no API key, no per-token bill. |
-| 📱 **Works with any app** | Uses Android Accessibility to read, tap, type and scroll, so it isn't limited to apps with an API. |
-| 🛠️ **56 tools** | Messaging, calls, files, camera, sensors, device settings, web search, shopping and rides. |
-| 🛡️ **Human in the loop** | Sensitive actions need your approval, and it stops at the payment page. You always pay yourself. |
+| 📱 **Hands off to your apps** | Opens WhatsApp, Gmail, Maps, Amazon, Uber and more with everything filled in. You make the final tap. |
+| 🛠️ **40 tools** | Messaging, files, camera, sensors, device controls, web search, shopping and rides. |
+| 🛡️ **You stay in control** | MySI never sends, calls, posts, books or pays by itself, and it only sees files you pick. |
 
 ## See what it can do
 
-> "Send the latest PDF from my Downloads to Riya on WhatsApp."
+> "Send the PDF I pick to Riya on WhatsApp."
 >
-> "Add any pen under ₹500 to my Amazon cart."
+> "Find me a pen on Amazon."
 >
-> "Order a margherita pizza on Zomato and take me to checkout."
+> "What's the weather in Pune this weekend?"
 >
-> "Compare Uber options to the airport."
+> "Get me an Uber to the airport."
 
 ## How it works
 
@@ -44,11 +44,11 @@ flowchart LR
     U["You: text or voice"] --> A["Agent loop<br/>up to 12 tool steps"]
     A <--> M["Gemma 4 on LiteRT-LM<br/>on-device, GPU or CPU"]
     A --> G{"Needs<br/>approval?"}
-    G -- yes --> P["Allow / Deny<br/>dialog or heads-up notification"]
-    P -- allowed --> T["56 tools"]
+    G -- yes --> P["Allow / Deny<br/>dialog or notification"]
+    P -- allowed --> T["40 tools"]
     G -- no --> T
-    T --> S["Android APIs<br/>SMS, calls, files, sensors"]
-    T --> X["Accessibility<br/>read, tap, type in any app"]
+    T --> S["Android APIs<br/>contacts, location, sensors"]
+    T --> H["App hand-offs<br/>pre-filled, you tap Send"]
     T --> W["Web<br/>search, read pages"]
     T -- result --> A
 ```
@@ -59,34 +59,43 @@ Every tool call goes through MySI's own gate. The engine's automatic tool callin
 
 | Area | Tools |
 |---|---|
-| **Screen control** | `open_app` `read_screen` `tap_text` `type_text` `scroll` `press_button` |
-| **Communication** | `send_whatsapp` `whatsapp_send_files` `send_sms` `read_sms` `send_email` `call_phone` `read_call_log` `search_contacts` `read_notifications` |
-| **Commerce** | `amazon_search` `amazon_add_to_cart` `app_search` `add_item` `go_to_checkout` `book_ride` |
-| **Web and media** | `search_internet` `read_web_page` `open_in_chrome` `google_app_search` `youtube_search` `maps` `play_store_search` `media_control` |
-| **Files** | `find_media` `find_files` `list_files` `read_text_file` `write_text_file` `create_pdf` `share_to_app` |
+| **Communication** | `whatsapp_message` `whatsapp_files` `compose_sms` `compose_email` `dial_number` `search_contacts` |
+| **Commerce and travel** | `amazon_search` `ride_to` `maps` |
+| **Web and media** | `search_internet` `read_web_page` `open_in_chrome` `google_app_search` `youtube_search` `play_store_search` `media_control` |
+| **Files** | `pick_files` `list_files` `read_text_file` `write_text_file` `create_pdf` `share_to_app` |
 | **Social** | `post_to_social` `open_profile` |
-| **Device** | `get_location` `read_sensors` `device_status` `take_photo` `record_audio` `speak` `flashlight` `vibrate` `set_volume` `set_brightness` `bluetooth` `open_settings` `set_alarm` `set_timer` `clipboard_read` `clipboard_write` `list_apps` `get_datetime` |
-
-Food and grocery skills cover Zomato, Swiggy, Blinkit, BigBasket and Amazon Now. Rides cover Uber, Ola and Rapido.
+| **Device** | `open_app` `list_apps` `get_location` `read_sensors` `device_status` `take_photo` `speak` `flashlight` `vibrate` `set_volume` `open_settings` `set_alarm` `set_timer` `clipboard_read` `clipboard_write` `get_datetime` |
 
 ## Safety by design
 
-An agent with this much access has to be built defensively:
-
-- **Approval gate.** Sensitive tools ask first, even when another app is on screen. No answer within 2 minutes counts as no.
-- **No autonomous payments.** MySI goes up to the payment page and stops.
-- **Prompt-injection rule.** Text from SMS, notifications, screens, files and contacts is treated as data, never as instructions.
-- **Secrets stay put.** The agent is instructed never to share OTPs, passwords or bank details.
+- **You make the final tap.** Messages, emails, calls, posts, rides and orders open pre-filled in the right app. Nothing is sent, booked or paid without you.
+- **No screen control.** MySI does not use Accessibility and cannot read or tap other apps.
+- **Your files, your choice.** MySI only sees files you choose in Android's picker, and the files it makes.
+- **Private data stays put.** Once a chat has read your contacts, location, files, apps or clipboard, every web search, page read or link MySI opens needs your approval until you start a new chat. Messages and shares always wait for your own tap.
+- **Permissions in context.** Contacts and location are asked for only when a task first needs them.
+- **Prompt-injection rule.** Text from web pages, files and contacts is treated as data, never as instructions.
+- **Report bad replies.** Every AI reply has a *Report this reply* link that sends it to the MySI team from inside the app.
 - **Bounded runs.** Each request is capped at 12 tool steps.
 
-Model inference is fully local. Tasks that need the internet, such as web search or shopping, still use the network like any other app. The agent's safeguards are a mix of hard app logic and model instructions, so treat MySI as an early release and review what it does.
+Model inference is fully local. Web search, page reading and reports use the network like any other app. See the [privacy policy](PRIVACY.md).
+
+## Permissions
+
+| Permission | Why |
+|---|---|
+| Internet, network state | Web search, reading pages, AI content reports |
+| Contacts | Turning a name into a number for WhatsApp, and `search_contacts` |
+| Location (approximate or precise) | `get_location` |
+| Notifications | Allow/Deny prompts while another app is open |
+| Vibrate, set alarm | `vibrate`, `set_alarm`, `set_timer` |
+
+No SMS, call log, Accessibility, notification access, all-files access, system-settings or background-service permissions.
 
 ## Quick start
 
 1. Download the latest APK from [**Releases**](https://github.com/aryanipb/MySI/releases/latest). Most phones need the `arm64` build.
-2. Download a Gemma 4 `.litertlm` model, for example from [LiteRT Community](https://huggingface.co/litert-community), and save it to `Download`.
-3. Open MySI, tap **Load model**, then **Grant access** and finish the setup list.
-4. If Android blocks Accessibility as a restricted setting, go to App info → ⋮ → **Allow restricted settings**.
+2. Download a Gemma 4 `.litertlm` model, for example from [LiteRT Community](https://huggingface.co/litert-community).
+3. Open MySI, tap **Load model** and pick the file. MySI copies it into its own storage.
 
 Requires Android 14 or later and enough free RAM and storage for the model you choose.
 
@@ -100,27 +109,28 @@ cd MySI
 ./gradlew assembleRelease
 ```
 
-Without release-key environment variables, local builds use your debug key. APKs land in `app/build/outputs/apk/release/`.
+Without release-key environment variables, local builds use your debug key. APKs land in `app/build/outputs/apk/release/`; `./gradlew bundleRelease` makes the Play bundle in `app/build/outputs/bundle/release/`.
+
+In-app AI content reports go to a Google Form. Make a form with short or paragraph questions, then use ⋮ → **Get pre-filled link** and type each question's key as its answer: `category`, `reply`, `details`, `prompt`, `model` and `app_version` (`category` and `reply` are required). Pass that link as `MYSI_REPORT_URL` (or `-Pmysi.reportUrl=`). Builds signed with the release key fail without it. The form must not require sign-in.
 
 ## CI/CD
 
-- **CI** lints and builds every push and pull request.
-- **Release** runs on any `v*` tag, builds signed APKs and publishes them to GitHub Releases with SHA-256 checksums.
+- **CI** runs the unit tests, lints and builds every push and pull request.
+- **Release** runs on any `v*` tag, builds signed APKs and the Play `.aab`, and publishes them to GitHub Releases with SHA-256 checksums. It needs the `MYSI_KEYSTORE_BASE64`, `MYSI_KEYSTORE_PASSWORD`, `MYSI_KEY_ALIAS`, `MYSI_KEY_PASSWORD` and `MYSI_REPORT_URL` secrets.
 
 ## Project layout
 
 ```text
 app/src/main/java/com/mysi/agent/
-├── Agent.kt                      Model lifecycle and the tool-calling loop
-├── Tools.kt                      Core phone tools
-├── AppTools.kt                   WhatsApp, email, social, web, Amazon and file search
-├── ShopTools.kt                  Food, grocery and ride skills
-├── AgentAccessibilityService.kt  Reads the screen and performs gestures
-├── Approvals.kt                  Heads-up approvals over any app
-├── AgentService.kt               Keeps the agent alive in the background
-├── NotificationReader.kt         Notification access
-├── MainActivity.kt               Chat, setup and model loading
-└── Ui.kt                         Lightweight view-based UI
+├── Agent.kt         Model lifecycle, the tool-calling loop and the approval gate
+├── Tools.kt         Core phone tools
+├── AppTools.kt      Hand-offs to WhatsApp, email, social, Amazon, Maps and ride apps
+├── Web.kt           Background web search and page reading
+├── Storage.kt       Workspace, picked files and publishing to Download/MySI
+├── Approvals.kt     Allow/Deny notifications while another app is open
+├── Reports.kt       In-app reporting of AI replies
+├── MainActivity.kt  Chat, pickers, permissions and model loading
+└── Ui.kt            Lightweight view-based UI
 ```
 
 ## Built by

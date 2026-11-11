@@ -23,9 +23,11 @@ jobs:
       - uses: gradle/actions/wrapper-validation@v4
       - uses: gradle/actions/setup-gradle@v4
       - name: Lint and build
-        run: ./gradlew --no-daemon lintRelease assembleRelease
+        run: ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease bundleRelease
       - uses: actions/upload-artifact@v4
         with:
           name: mysi-apks-${{ github.sha }}
-          path: app/build/outputs/apk/release/*.apk
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/bundle/release/*.aab
           retention-days: 14

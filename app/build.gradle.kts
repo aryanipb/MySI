@@ -3,6 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val reportUrl: String = System.getenv("MYSI_REPORT_URL") ?: (findProperty("mysi.reportUrl") as String?) ?: ""
+
 android {
     namespace = "com.mysi.agent"
     compileSdk = 36
@@ -10,14 +12,32 @@ android {
     defaultConfig {
         applicationId = "com.mysi.agent"
         minSdk = 34
-        // 35, not 36: API 36 replaces BODY_SENSORS with Health Connect permissions.
-        targetSdk = 35
-        versionCode = 7
-        versionName = "0.7"
+        // Google Play requires API 36 for new apps and updates from 31 August 2026.
+        targetSdk = 36
+        versionCode = 8
+        versionName = "0.8"
+
+        // Google Form pre-filled link that receives in-app AI content reports (Play's AI-Generated
+        // Content policy). Set MYSI_REPORT_URL or -Pmysi.reportUrl=; release-signed builds fail without it.
+        buildConfigField("String", "REPORT_URL", "\"${reportUrl.replace("\"", "")}\"")
+        // Linked inside the app, as Google Play's User Data policy requires.
+        buildConfigField("String", "PRIVACY_URL", "\"https://github.com/aryanipb/MySI/blob/main/PRIVACY.md\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     // CI passes the release key through environment variables; local builds fall back to debug.
     val releaseKeystore = System.getenv("MYSI_KEYSTORE_PATH")
+    // Release-signed builds must ship working AI content reports (see Reports.kt for the link format).
+    val reportLink = Regex("""^https://docs\.google\.com/forms/.+/viewform\?.*""")
+    if (releaseKeystore != null &&
+        !(reportLink.matches(reportUrl) && "=category" in reportUrl && "=reply" in reportUrl))
+        throw GradleException(
+            "MYSI_REPORT_URL must be the Google Form pre-filled link with fields category and reply: " +
+                "Play requires in-app AI content reports."
+        )
     signingConfigs {
         if (releaseKeystore != null) {
             create("release") {
@@ -62,4 +82,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("com.google.code.gson:gson:2.14.0")
+
+    testImplementation("junit:junit:4.13.2")
 }

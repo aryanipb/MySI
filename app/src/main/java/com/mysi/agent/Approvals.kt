@@ -45,7 +45,8 @@ object Approvals {
             .setCategory(Notification.CATEGORY_REMINDER)
             .setOngoing(true)
             .addAction(Notification.Action.Builder(null, "Deny", action(false)).build())
-            .addAction(Notification.Action.Builder(null, "Allow", action(true)).build())
+            // Allowing needs an unlocked phone, so nobody can approve from the lock screen.
+            .addAction(Notification.Action.Builder(null, "Allow", action(true)).setAuthenticationRequired(true).build())
             .build()
         nm.notify(id, n)
         return try {

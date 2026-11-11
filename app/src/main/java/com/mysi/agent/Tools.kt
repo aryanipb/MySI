@@ -1,5 +1,6 @@
 package com.mysi.agent
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.content.ClipData
@@ -18,7 +19,6 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.location.LocationManager
 import android.media.AudioManager
-import android.media.MediaRecorder
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
@@ -30,12 +30,10 @@ import android.os.StatFs
 import android.os.VibrationEffect
 import android.os.VibratorManager
 import android.provider.AlarmClock
-import android.provider.CallLog
 import android.provider.ContactsContract
+import android.provider.MediaStore
 import android.provider.Settings
-import android.provider.Telephony
 import android.speech.tts.TextToSpeech
-import android.telephony.SmsManager
 import android.telephony.TelephonyManager
 import android.text.Layout
 import android.text.StaticLayout
@@ -81,15 +79,22 @@ class Args(private val m: Map<String, Any?>) {
 }
 
 /**
- * One device capability exposed to the model. [confirm] returns the question shown to the user
- * before anything leaves the phone or is overwritten; a null lambda or a null question means the
- * tool runs without asking.
+ * One device capability exposed to the model.
+ *
+ * [confirm] returns the question shown to the user before the tool runs; a null lambda or a null
+ * question means it runs without asking. [privateData] marks tools whose results carry personal
+ * data (contacts, location, files, clipboard). [outbound] marks tools that send model-written text
+ * to a third party (a web request, or an app opened on a URL). Once a request has touched private
+ * data, every outbound call in that request needs the user's approval, so a prompt injection
+ * cannot quietly carry personal data off the phone.
  */
 class ToolDef(
     val name: String,
     val description: String,
     val params: List<Param> = emptyList(),
     val confirm: ((Args) -> String?)? = null,
+    val privateData: Boolean = false,
+    val outbound: Boolean = false,
     val run: suspend (Args) -> Any?,
 ) {
     fun schemaJson(): String {
@@ -129,34 +134,29 @@ interface Host {
     suspend fun confirm(title: String, message: String): Boolean
 
     suspend fun takePhoto(file: File): Boolean
+
+    /** Runs a system picker (photo picker or documents) and returns what the user chose. */
+    suspend fun pick(intent: Intent): List<Uri>
+
+    /** Shows Android's permission prompt; returns when the user has answered. */
+    suspend fun requestPermissions(permissions: List<String>)
 }
 
 @SuppressLint("MissingPermission")
 object Tools {
-    private val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
-
-    fun time(ms: Long): String = stamp.format(Date(ms))
-
     private var tts: TextToSpeech? = null
 
-    private fun outDir(ctx: Context, sub: String): File {
-        val base =
-            if (Environment.isExternalStorageManager())
-                File(Environment.getExternalStorageDirectory(), "Documents/MySI/$sub")
-            else File(ctx.getExternalFilesDir(null), sub)
-        return base.apply { mkdirs() }
-    }
-
-    internal fun resolve(path: String): File =
-        if (path.startsWith("/")) File(path) else File(Environment.getExternalStorageDirectory(), path)
-
+    /** Opens another app. Android blocks this while MySI is in the background, so say so instead. */
     internal fun launch(ctx: Context, intent: Intent): String =
-        try {
+        if (!Agent.inFront) "Could not open: MySI is in the background, and Android only lets it open apps while it is on screen. Ask the user to come back to MySI and try again."
+        else try {
             ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             "Opened."
         } catch (e: Exception) {
             "Could not open: ${e.message}"
         }
+
+    internal fun opened(result: String) = !result.startsWith("Could not")
 
     private fun apps(ctx: Context): List<Pair<String, String>> {
         val pm = ctx.packageManager
@@ -169,12 +169,15 @@ object Tools {
             .sortedBy { it.first.lowercase() }
     }
 
+    internal const val NO_CONTACTS =
+        "MySI does not have contacts access. Ask the user to allow it when MySI asks, or in Settings › Apps › MySI Agent › Permissions."
+
     fun all(ctx: Context, host: () -> Host?): List<ToolDef> =
         listOf(
-            // ---------- apps & navigation ----------
+            // ---------- apps ----------
             ToolDef(
                 "open_app",
-                "Open an installed app by its name, e.g. WhatsApp, Camera, Settings.",
+                "Open an installed app by its name, e.g. WhatsApp, Camera, Zomato, Uber.",
                 listOf(Param("name", "string", "App name as shown on the home screen")),
             ) { a ->
                 val q = a.str("name")
@@ -187,69 +190,43 @@ object Tools {
                     ?: return@ToolDef "App '${hit.first}' has no launch screen."
                 launch(ctx, intent).let { "Opening ${hit.first}. $it" }
             },
-            ToolDef("list_apps", "List names of all installed apps.") { apps(ctx).map { it.first } },
-            // ---------- messages, calls, contacts ----------
+            ToolDef("list_apps", "List names of all installed apps.", privateData = true) { apps(ctx).map { it.first } },
+            // ---------- messages, calls, contacts (the user makes the final tap) ----------
             ToolDef(
-                "read_sms",
-                "Read recent SMS messages.",
-                listOf(
-                    Param("box", "string", "inbox or sent", false, listOf("inbox", "sent")),
-                    Param("count", "integer", "How many, default 10", false),
-                    Param("contains", "string", "Only messages containing this text or from this number", false),
-                ),
-            ) { a ->
-                val uri = if (a.str("box") == "sent") Telephony.Sms.Sent.CONTENT_URI else Telephony.Sms.Inbox.CONTENT_URI
-                val q = a.str("contains")
-                val out = mutableListOf<Map<String, String>>()
-                ctx.contentResolver
-                    .query(uri, arrayOf("address", "body", "date"), null, null, "date DESC")
-                    ?.use { c ->
-                        while (c.moveToNext() && out.size < a.int("count", 10).coerceIn(1, 50)) {
-                            val from = c.getString(0).orEmpty()
-                            val body = c.getString(1).orEmpty()
-                            if (q.isNotEmpty() && !body.contains(q, true) && !from.contains(q)) continue
-                            out += mapOf("from" to from, "text" to body.take(400), "time" to time(c.getLong(2)))
-                        }
-                    }
-                out
-            },
-            ToolDef(
-                "send_whatsapp",
-                "Send a WhatsApp message to a contact name or phone number. Use this whenever the user says WhatsApp.",
+                "whatsapp_message",
+                "Open a WhatsApp chat with a contact or phone number with the message typed in. The user taps Send. Use this whenever the user says WhatsApp.",
                 listOf(
                     Param("to", "string", "Contact name or phone number"),
                     Param("message", "string", "Message text"),
                 ),
-                confirm = { a ->
-                    val who = whatsappTarget(ctx, a.str("to"))
-                    if (who == null) "No contact or number matches '${a.str("to")}'. Continue anyway?"
-                    else "Send WhatsApp to ${who.first} (+${who.second})?\n\n\"${a.str("message")}\""
-                },
-            ) { a -> sendWhatsapp(ctx, a.str("to"), a.str("message")) },
+                privateData = true,
+            ) { a -> whatsappMessage(ctx, a.str("to"), a.str("message")) },
             ToolDef(
-                "send_sms",
-                "Send an SMS text message.",
+                "compose_sms",
+                "Open the SMS app with a text message ready to send. The user taps Send.",
                 listOf(
                     Param("to", "string", "Phone number"),
                     Param("message", "string", "Message text"),
                 ),
-                confirm = { a -> "Send SMS to ${a.str("to")}?\n\n\"${a.str("message")}\"" },
             ) { a ->
-                val sms = ctx.getSystemService(SmsManager::class.java)
-                sms.sendMultipartTextMessage(a.str("to"), null, sms.divideMessage(a.str("message")), null, null)
-                "SMS sent to ${a.str("to")}."
+                val r = launch(ctx, Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(a.str("to")))).putExtra("sms_body", a.str("message")))
+                if (opened(r)) "SMS to ${a.str("to")} is ready in the messages app. The user must tap Send." else r
             },
             ToolDef(
-                "call_phone",
-                "Place a phone call.",
+                "dial_number",
+                "Open the phone dialer with a number filled in. The user taps Call.",
                 listOf(Param("number", "string", "Phone number")),
-                confirm = { a -> "Call ${a.str("number")} now?" },
-            ) { a -> launch(ctx, Intent(Intent.ACTION_CALL, Uri.parse("tel:" + a.str("number")))) },
+            ) { a ->
+                val r = launch(ctx, Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(a.str("number")))))
+                if (opened(r)) "Dialer is open with ${a.str("number")}. The user must tap Call." else r
+            },
             ToolDef(
                 "search_contacts",
                 "Find contacts and their phone numbers by name.",
                 listOf(Param("name", "string", "Full or partial name")),
+                privateData = true,
             ) { a ->
+                if (!Agent.askFor(Manifest.permission.READ_CONTACTS)) return@ToolDef NO_CONTACTS
                 val out = mutableListOf<Map<String, String>>()
                 ctx.contentResolver
                     .query(
@@ -262,74 +239,35 @@ object Tools {
                         arrayOf("%${a.str("name")}%"),
                         null,
                     )
-                    ?.use { c -> while (c.moveToNext() && out.size < 15) out += mapOf("name" to c.getString(0), "number" to c.getString(1)) }
+                    ?.use { c -> while (c.moveToNext() && out.size < 15) out += mapOf("name" to c.getString(0).orEmpty(), "number" to c.getString(1).orEmpty()) }
                 out.ifEmpty { "No contact matches '${a.str("name")}'." }
             },
-            ToolDef(
-                "read_call_log",
-                "Read recent calls.",
-                listOf(Param("count", "integer", "How many, default 10", false)),
-            ) { a ->
-                val out = mutableListOf<Map<String, String>>()
-                ctx.contentResolver
-                    .query(
-                        CallLog.Calls.CONTENT_URI,
-                        arrayOf(CallLog.Calls.NUMBER, CallLog.Calls.CACHED_NAME, CallLog.Calls.TYPE, CallLog.Calls.DATE, CallLog.Calls.DURATION),
-                        null,
-                        null,
-                        "${CallLog.Calls.DATE} DESC",
-                    )
-                    ?.use { c ->
-                        while (c.moveToNext() && out.size < a.int("count", 10).coerceIn(1, 50)) {
-                            val type =
-                                when (c.getInt(2)) {
-                                    CallLog.Calls.INCOMING_TYPE -> "incoming"
-                                    CallLog.Calls.OUTGOING_TYPE -> "outgoing"
-                                    CallLog.Calls.MISSED_TYPE -> "missed"
-                                    CallLog.Calls.REJECTED_TYPE -> "rejected"
-                                    else -> "other"
-                                }
-                            out += mapOf(
-                                "number" to c.getString(0).orEmpty(),
-                                "name" to (c.getString(1) ?: ""),
-                                "type" to type,
-                                "time" to time(c.getLong(3)),
-                                "seconds" to c.getLong(4).toString(),
-                            )
-                        }
-                    }
-                out
-            },
-            ToolDef(
-                "read_notifications",
-                "Read the notifications currently shown on the phone.",
-                listOf(Param("count", "integer", "How many, default 15", false)),
-            ) { a -> NotificationReader.read(a.int("count", 15).coerceIn(1, 40)) },
             // ---------- sensors & device ----------
-            ToolDef("read_sensors", "Read motion and environment sensors: accelerometer, gyroscope, magnetometer, light, proximity, pressure, steps, heart rate.") {
+            ToolDef("read_sensors", "Read motion and environment sensors: accelerometer, gyroscope, magnetometer, light, proximity, pressure, temperature, humidity.") {
                 readSensors(ctx)
             },
-            ToolDef("get_location", "Get the current GPS location.") { location(ctx) },
+            ToolDef("get_location", "Get the current location.", privateData = true) {
+                if (!Agent.askFor(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                    return@ToolDef "MySI does not have location access. Ask the user to allow it when MySI asks, or in Settings › Apps › MySI Agent › Permissions."
+                location(ctx)
+            },
             ToolDef("device_status", "Battery, charging, network, storage, memory, phone model and Android version.") {
                 status(ctx)
             },
             ToolDef("get_datetime", "Current date, time and weekday.") {
                 SimpleDateFormat("EEEE, d MMMM yyyy, HH:mm:ss", Locale.getDefault()).format(Date())
             },
-            // ---------- camera, audio, voice ----------
-            ToolDef("take_photo", "Open the camera so the user can take a photo; returns the saved file path.") {
-                val h = host() ?: return@ToolDef "The app must be open on screen to use the camera."
-                val f = File(ctx.getExternalFilesDir("Pictures"), "photo_${System.currentTimeMillis()}.jpg")
-                if (!h.takePhoto(f) || f.length() == 0L) return@ToolDef "No photo was taken."
-                val final = File(outDir(ctx, "Photos"), f.name)
-                if (final != f) f.copyTo(final, true).also { f.delete() }
-                "Photo saved: ${final.absolutePath}"
+            // ---------- camera, voice ----------
+            ToolDef("take_photo", "Open the camera so the user can take a photo; returns the photo's path for sharing tools.") {
+                val h = host()?.takeIf { it.inFront } ?: return@ToolDef "Open MySI on screen to use the camera."
+                val f = File(File(Storage.workspace(ctx), "Photos").apply { mkdirs() }, "photo_${System.currentTimeMillis()}.jpg")
+                if (!h.takePhoto(f) || f.length() == 0L) {
+                    f.delete()
+                    return@ToolDef "No photo was taken."
+                }
+                val shown = runCatching { Storage.publish(ctx, f, photo = true) }.getOrNull()
+                "Photo saved: ${f.absolutePath}" + (shown?.let { " (also in the gallery under $it)" } ?: "")
             },
-            ToolDef(
-                "record_audio",
-                "Record audio from the microphone.",
-                listOf(Param("seconds", "integer", "Length in seconds, 1-120")),
-            ) { a -> record(ctx, a.int("seconds", 10).coerceIn(1, 120)) },
             ToolDef(
                 "speak",
                 "Speak text aloud through the phone speaker.",
@@ -394,35 +332,15 @@ object Tools {
                 "Sent ${a.str("action")}."
             },
             ToolDef(
-                "set_brightness",
-                "Set screen brightness.",
-                listOf(Param("percent", "integer", "0 to 100")),
-            ) { a ->
-                if (!Settings.System.canWrite(ctx)) return@ToolDef "Modify-system-settings permission is not granted."
-                Settings.System.putInt(ctx.contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
-                Settings.System.putInt(ctx.contentResolver, Settings.System.SCREEN_BRIGHTNESS, 255 * a.int("percent", 50).coerceIn(1, 100) / 100)
-                "Brightness set."
-            },
-            ToolDef(
-                "bluetooth",
-                "Turn Bluetooth on or off. Android shows a one-tap system prompt.",
-                listOf(Param("on", "boolean", "true for on, false for off")),
-            ) { a ->
-                launch(
-                    ctx,
-                    Intent(if (a.bool("on", true)) "android.bluetooth.adapter.action.REQUEST_ENABLE" else "android.bluetooth.adapter.action.REQUEST_DISABLE"),
-                )
-            },
-            ToolDef(
                 "open_settings",
-                "Open a settings screen. Android blocks apps from switching Wi-Fi, hotspot, mobile data, NFC or airplane mode directly, so open the page and then use tap_text to flip the switch.",
+                "Open a settings screen, e.g. to change Wi-Fi, Bluetooth, brightness or mobile data. Apps cannot flip these switches themselves, so tell the user what to tap.",
                 listOf(
                     Param(
                         "page",
                         "string",
                         "Which settings page",
                         true,
-                        listOf("wifi", "hotspot", "bluetooth", "mobile_data", "airplane", "nfc", "location", "display", "sound", "battery", "apps", "storage", "accessibility", "notifications", "date", "developer", "main"),
+                        listOf("wifi", "hotspot", "bluetooth", "mobile_data", "airplane", "nfc", "location", "display", "sound", "battery", "apps", "storage", "accessibility", "notifications", "date", "main"),
                     )
                 ),
             ) { a ->
@@ -442,11 +360,10 @@ object Tools {
                     "accessibility" -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                     "notifications" -> Intent(Settings.ACTION_ALL_APPS_NOTIFICATION_SETTINGS)
                     "date" -> Intent(Settings.ACTION_DATE_SETTINGS)
-                    "developer" -> Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
                     else -> Intent(Settings.ACTION_SETTINGS)
                 }
                 val r = launch(ctx, intent)
-                if (r.startsWith("Could not") && a.str("page") == "hotspot") launch(ctx, Intent(Settings.ACTION_WIRELESS_SETTINGS)) else r
+                if (!opened(r) && a.str("page") == "hotspot") launch(ctx, Intent(Settings.ACTION_WIRELESS_SETTINGS)) else r
             },
             ToolDef(
                 "set_alarm",
@@ -460,8 +377,8 @@ object Tools {
                 launch(
                     ctx,
                     Intent(AlarmClock.ACTION_SET_ALARM)
-                        .putExtra(AlarmClock.EXTRA_HOUR, a.int("hour", 7))
-                        .putExtra(AlarmClock.EXTRA_MINUTES, a.int("minute", 0))
+                        .putExtra(AlarmClock.EXTRA_HOUR, a.int("hour", 7).coerceIn(0, 23))
+                        .putExtra(AlarmClock.EXTRA_MINUTES, a.int("minute", 0).coerceIn(0, 59))
                         .putExtra(AlarmClock.EXTRA_MESSAGE, a.str("label", "MySI"))
                         .putExtra(AlarmClock.EXTRA_SKIP_UI, true),
                 )
@@ -474,12 +391,12 @@ object Tools {
                 launch(
                     ctx,
                     Intent(AlarmClock.ACTION_SET_TIMER)
-                        .putExtra(AlarmClock.EXTRA_LENGTH, a.int("seconds", 60))
+                        .putExtra(AlarmClock.EXTRA_LENGTH, a.int("seconds", 60).coerceIn(1, 86_400))
                         .putExtra(AlarmClock.EXTRA_MESSAGE, a.str("label", "MySI"))
                         .putExtra(AlarmClock.EXTRA_SKIP_UI, true),
                 )
             },
-            ToolDef("clipboard_read", "Read the text on the clipboard.") {
+            ToolDef("clipboard_read", "Read the text on the clipboard.", privateData = true) {
                 withContext(Dispatchers.Main) {
                     ctx.getSystemService(ClipboardManager::class.java).primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString()
                         ?: "Clipboard is empty."
@@ -495,80 +412,56 @@ object Tools {
                 }
                 "Copied."
             },
-            // ---------- screen control (accessibility) ----------
+            // ---------- files (picked by the user, or made by MySI) ----------
             ToolDef(
-                "press_button",
-                "Press a system button or open a system panel.",
+                "pick_files",
+                "Ask the user to choose photos, videos or documents in Android's picker. Returns paths to use with sharing and file tools. This is the only way to reach the user's own files.",
                 listOf(
-                    Param("action", "string", "Which", true, listOf("home", "back", "recents", "notifications", "quick_settings", "lock_screen", "screenshot", "power_menu"))
+                    Param("kind", "string", "What to pick", true, listOf("photo", "video", "photo_or_video", "pdf", "document", "audio", "any")),
+                    Param("multiple", "boolean", "Allow choosing several, default true", false),
                 ),
-            ) { a -> AgentAccessibilityService.instance?.global(a.str("action")) ?: NO_A11Y },
-            ToolDef("read_screen", "Read all visible text and buttons on the current screen, in any app.") {
-                AgentAccessibilityService.instance?.readScreen() ?: NO_A11Y
-            },
-            ToolDef(
-                "tap_text",
-                "Tap the button, switch or item on screen that shows this text.",
-                listOf(Param("text", "string", "Visible text of the element")),
-                confirm = { a ->
-                    if (MONEY.containsMatchIn(a.str("text"))) "Tap \"${a.str("text")}\"? This can place an order or make a payment." else null
-                },
-            ) { a ->
-                val s = AgentAccessibilityService.instance ?: return@ToolDef NO_A11Y
-                withContext(Dispatchers.Main) { s.tapText(a.str("text")) }.also { delay(700) }
-            },
-            ToolDef(
-                "type_text",
-                "Type text into the focused text field on screen.",
-                listOf(Param("text", "string", "Text to type")),
-            ) { a ->
-                val s = AgentAccessibilityService.instance ?: return@ToolDef NO_A11Y
-                val first = s.typeText(a.str("text"))
-                if (first == "Typed.") return@ToolDef first
-                // Many apps (Amazon, YouTube, Settings) show a search *button* that opens the real field.
-                if (!withContext(Dispatchers.Main) { s.focusSearch() }) return@ToolDef first
-                delay(900)
-                s.typeText(a.str("text"))
-            },
-            ToolDef(
-                "scroll",
-                "Scroll the current screen.",
-                listOf(Param("direction", "string", "Direction", true, listOf("up", "down"))),
-            ) { a -> (AgentAccessibilityService.instance?.scroll(a.str("direction")) ?: NO_A11Y).also { delay(600) } },
-            // ---------- files & documents ----------
+                privateData = true,
+            ) { a -> pickFiles(ctx, host, a.str("kind"), a.bool("multiple", true)) },
             ToolDef(
                 "list_files",
-                "List files in a folder of phone storage.",
-                listOf(Param("path", "string", "Folder, e.g. Download or Documents. Default: storage root", false)),
+                "List the files MySI made (notes, PDFs, photos) in its workspace.",
+                listOf(Param("folder", "string", "Sub-folder, e.g. Documents or Photos. Default: the whole workspace", false)),
+                privateData = true,
             ) { a ->
-                val dir = resolve(a.str("path"))
-                val files = dir.listFiles() ?: return@ToolDef "Cannot read ${dir.absolutePath}. All-files access may be missing."
+                val dir = Storage.resolve(ctx, a.str("folder").ifBlank { "." })
+                    ?: return@ToolDef "MySI can only list its own workspace."
+                val files = dir.listFiles() ?: return@ToolDef "No folder named '${a.str("folder")}' in the workspace."
                 files.sortedByDescending { it.lastModified() }.take(100).map {
-                    if (it.isDirectory) "${it.name}/" else "${it.name} (${it.length() / 1024} KB)"
-                }
+                    if (it.isDirectory) "${it.name}/" else "${it.absolutePath} (${it.length() / 1024} KB)"
+                }.ifEmpty { "The workspace is empty." }
             },
             ToolDef(
                 "read_text_file",
-                "Read a text file (txt, md, csv, json, etc.).",
-                listOf(Param("path", "string", "File path")),
+                "Read a text file (txt, md, csv, json, etc.) that the user picked or MySI made.",
+                listOf(Param("path", "string", "File path from pick_files or list_files")),
+                privateData = true,
             ) { a ->
-                val f = resolve(a.str("path"))
-                if (!f.isFile) "No such file: ${f.absolutePath}" else f.readText().take(4000)
+                val f = Storage.resolve(ctx, a.str("path")) ?: return@ToolDef "MySI can only read files the user picked (pick_files) or files it made."
+                if (!f.isFile) "No such file: ${a.str("path")}" else f.readText().take(4000)
             },
             ToolDef(
                 "write_text_file",
-                "Create or overwrite a text file.",
-                listOf(Param("path", "string", "File path, e.g. Documents/notes.txt"), Param("content", "string", "Text to write")),
-                confirm = { a -> "Write ${a.str("content").length} characters to ${resolve(a.str("path")).absolutePath}?" },
+                "Create or overwrite a text file in MySI's workspace; a copy appears in Download/MySI.",
+                listOf(Param("path", "string", "File name, e.g. Documents/notes.txt"), Param("content", "string", "Text to write")),
+                confirm = { a ->
+                    Storage.resolve(ctx, a.str("path"))?.takeIf { it.isFile }?.let { "Overwrite ${it.name} with ${a.str("content").length} characters?" }
+                },
             ) { a ->
-                val f = resolve(a.str("path"))
+                val f = Storage.resolve(ctx, a.str("path"))?.takeIf { !it.isDirectory }
+                    ?: return@ToolDef "Give a file name inside the workspace, e.g. Documents/notes.txt."
                 f.parentFile?.mkdirs()
                 f.writeText(a.str("content"))
-                "Saved ${f.absolutePath}"
+                val shown = runCatching { Storage.publish(ctx, f) }.getOrNull()
+                "Saved ${f.absolutePath}" + (shown?.let { "; the user can find it in $it" } ?: "")
             },
             ToolDef(
                 "create_pdf",
-                "Create a PDF document or report from text.",
+                "Create a PDF document or report from text; a copy appears in Download/MySI.",
                 listOf(
                     Param("title", "string", "Document title"),
                     Param("body", "string", "Full document text; use blank lines between paragraphs"),
@@ -580,11 +473,15 @@ object Tools {
     internal val callingCodes =
         mapOf("in" to "91", "us" to "1", "ca" to "1", "gb" to "44", "ae" to "971", "sa" to "966", "sg" to "65", "au" to "61", "de" to "49", "fr" to "33", "np" to "977", "bd" to "880", "lk" to "94", "pk" to "92")
 
-    /** Turns a contact name or a local/international number into WhatsApp's digits-only form. */
-    internal fun whatsappTarget(ctx: Context, to: String): Pair<String, String>? {
+    /**
+     * Turns a contact name or a local/international number into WhatsApp's digits-only form.
+     * Contacts access is only asked for when [to] is a name. Null means no match or no access.
+     */
+    internal suspend fun whatsappTarget(ctx: Context, to: String): Pair<String, String>? {
         val (name, raw) =
             if (to.count { it.isDigit() } >= 7) Pair(to, to)
             else {
+                if (!Agent.askFor(Manifest.permission.READ_CONTACTS)) return null
                 val hits = mutableListOf<Pair<String, String>>()
                 ctx.contentResolver
                     .query(
@@ -594,52 +491,79 @@ object Tools {
                         arrayOf("%$to%"),
                         null,
                     )
-                    ?.use { c -> while (c.moveToNext()) hits += c.getString(0) to c.getString(1) }
+                    ?.use { c -> while (c.moveToNext()) hits += c.getString(0).orEmpty() to c.getString(1).orEmpty() }
                 (hits.firstOrNull { it.first.equals(to, true) } ?: hits.firstOrNull()) ?: return null
             }
-        var digits = raw.filter { it.isDigit() }
         val code = callingCodes[ctx.getSystemService(TelephonyManager::class.java).simCountryIso.lowercase()] ?: "91"
-        digits = when {
-            raw.trim().startsWith("+") -> digits
-            digits.startsWith("00") -> digits.drop(2)
-            digits.startsWith("0") -> code + digits.drop(1)
-            digits.length <= 10 -> code + digits
-            else -> digits
-        }
-        return name to digits
+        return name to internationalDigits(raw, code)
     }
 
-    private suspend fun sendWhatsapp(ctx: Context, to: String, message: String): String {
-        val (name, number) = whatsappTarget(ctx, to) ?: return "No contact or number matches '$to'. Use search_contacts."
-        val pkg = listOf("com.whatsapp", "com.whatsapp.w4b").firstOrNull {
-            runCatching { ctx.packageManager.getPackageInfo(it, 0) }.isSuccess
-        } ?: return "WhatsApp is not installed."
-        val opened = launch(
+    /** "+44 20…" → "4420…", "0098…" → "98…", "098…" or "98…" (≤10 digits) → [countryCode] + "98…". */
+    internal fun internationalDigits(raw: String, countryCode: String): String {
+        val digits = raw.filter { it.isDigit() }
+        return when {
+            raw.trim().startsWith("+") -> digits
+            digits.startsWith("00") -> digits.drop(2)
+            digits.startsWith("0") -> countryCode + digits.drop(1)
+            digits.length <= 10 -> countryCode + digits
+            else -> digits
+        }
+    }
+
+    /** Explains a null [whatsappTarget]: missing contacts access, or no match. */
+    internal fun noTarget(ctx: Context, to: String) =
+        if (to.count { it.isDigit() } < 7 && ctx.checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) NO_CONTACTS
+        else "No contact or number matches '$to'. Use search_contacts, or ask the user for the number."
+
+    internal fun whatsappPackage(ctx: Context) =
+        listOf("com.whatsapp", "com.whatsapp.w4b").firstOrNull { runCatching { ctx.packageManager.getPackageInfo(it, 0) }.isSuccess }
+
+    private suspend fun whatsappMessage(ctx: Context, to: String, message: String): String {
+        val (name, number) = whatsappTarget(ctx, to) ?: return noTarget(ctx, to)
+        val pkg = whatsappPackage(ctx) ?: return "WhatsApp is not installed."
+        val r = launch(
             ctx,
             Intent(Intent.ACTION_VIEW, Uri.parse("https://api.whatsapp.com/send?phone=$number&text=" + Uri.encode(message))).setPackage(pkg),
         )
-        if (opened.startsWith("Could not")) return opened
-        val a11y = AgentAccessibilityService.instance
-            ?: return "Opened the WhatsApp chat with $name with the message typed, but screen control is off, so the user must tap Send."
-        repeat(20) {
-            delay(500)
-            if (withContext(Dispatchers.Main) { a11y.clickById("$pkg:id/send", "Send", pkg) }) {
-                delay(800)
-                return "WhatsApp message sent to $name (+$number)."
-            }
-        }
-        return "Opened the chat with $name but could not find the Send button. Use read_screen to see what WhatsApp is showing."
+        return if (opened(r)) "WhatsApp chat with $name (+$number) is open with the message typed. The user must tap Send." else r
     }
 
-    /** Labels that can spend money; tapping them always needs the user's approval. */
-    internal val MONEY =
-        Regex(
-            "buy now|place (your )?order|\\bpay\\b|proceed to pay|confirm (order|payment|pickup|booking|ride)|subscribe|" +
-                "^book\\b|book (ride|now|cab|auto|bike)|^request\\b|swipe to",
-            RegexOption.IGNORE_CASE,
-        )
+    private val PICK_DOCS = mapOf(
+        "pdf" to arrayOf("application/pdf"),
+        "document" to arrayOf(
+            "application/pdf", "text/*", "application/msword", "application/rtf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ),
+        "audio" to arrayOf("audio/*"),
+        "any" to arrayOf("*/*"),
+    )
 
-    private const val NO_A11Y = "Screen control is off. Ask the user to enable 'MySI Agent control' in Accessibility settings."
+    private suspend fun pickFiles(ctx: Context, host: () -> Host?, kind: String, multiple: Boolean): Any {
+        val h = host()?.takeIf { it.inFront } ?: return "Open MySI on screen so the user can pick files."
+        val intent =
+            if (kind in listOf("photo", "video", "photo_or_video"))
+                // The system photo picker: no media permission, the user shares only what they choose.
+                Intent(MediaStore.ACTION_PICK_IMAGES).apply {
+                    when (kind) {
+                        "photo" -> type = "image/*"
+                        "video" -> type = "video/*"
+                    }
+                    if (multiple) putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX, minOf(20, MediaStore.getPickImagesMaxLimit()))
+                }
+            else
+                Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).apply {
+                    type = "*/*"
+                    putExtra(Intent.EXTRA_MIME_TYPES, PICK_DOCS[kind] ?: PICK_DOCS.getValue("any"))
+                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple)
+                }
+        val uris = h.pick(intent)
+        if (uris.isEmpty()) return "The user did not pick anything."
+        val (files, skipped) = withContext(Dispatchers.IO) { Storage.importPicked(ctx, uris) }
+        if (files.isEmpty()) return "Could not read the picked files." + if (skipped.isEmpty()) "" else " Skipped: ${skipped.joinToString(", ")}."
+        return mapOf("paths" to files.map { it.absolutePath }, "skipped" to skipped)
+    }
 
     private suspend fun readSensors(ctx: Context): Map<String, Any> {
         val sm = ctx.getSystemService(SensorManager::class.java)
@@ -650,8 +574,6 @@ object Tools {
             Sensor.TYPE_LIGHT to "light_lux",
             Sensor.TYPE_PROXIMITY to "proximity_cm",
             Sensor.TYPE_PRESSURE to "pressure_hPa",
-            Sensor.TYPE_STEP_COUNTER to "steps_since_boot",
-            Sensor.TYPE_HEART_RATE to "heart_rate_bpm",
             Sensor.TYPE_AMBIENT_TEMPERATURE to "temperature_C",
             Sensor.TYPE_RELATIVE_HUMIDITY to "humidity_pct",
         )
@@ -673,8 +595,11 @@ object Tools {
             val s = sm.getDefaultSensor(type)
             if (s == null) missing += key else sm.registerListener(listener, s, SensorManager.SENSOR_DELAY_NORMAL)
         }
-        delay(1500)
-        sm.unregisterListener(listener)
+        try {
+            delay(1500)
+        } finally {
+            sm.unregisterListener(listener)
+        }
         return synchronized(out) { out.toMap() } + ("not_on_this_phone" to missing)
     }
 
@@ -719,27 +644,6 @@ object Tools {
             "phone" to "${Build.MANUFACTURER} ${Build.MODEL}",
             "android" to Build.VERSION.RELEASE,
         )
-    }
-
-    private suspend fun record(ctx: Context, seconds: Int): String {
-        val f = File(outDir(ctx, "Recordings"), "rec_${System.currentTimeMillis()}.m4a")
-        val r = MediaRecorder(ctx).apply {
-            setAudioSource(MediaRecorder.AudioSource.MIC)
-            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            setAudioSamplingRate(44_100)
-            setAudioEncodingBitRate(128_000)
-            setOutputFile(f.absolutePath)
-            prepare()
-            start()
-        }
-        try {
-            delay(seconds * 1000L)
-        } finally {
-            runCatching { r.stop() }
-            r.release()
-        }
-        return "Recorded $seconds s: ${f.absolutePath}"
     }
 
     private suspend fun speak(ctx: Context, text: String): String =
@@ -788,9 +692,13 @@ object Tools {
             if (layout.lineCount == 0) break
         }
         val safe = name.ifBlank { title }.replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifBlank { "report" }
-        val f = File(outDir(ctx, "Documents"), "$safe.pdf")
-        f.outputStream().use { doc.writeTo(it) }
-        doc.close()
-        return "PDF saved (${page - 1} pages): ${f.absolutePath}"
+        val f = File(File(Storage.workspace(ctx), "Documents").apply { mkdirs() }, "$safe.pdf")
+        try {
+            f.outputStream().use { doc.writeTo(it) }
+        } finally {
+            doc.close()
+        }
+        val shown = runCatching { Storage.publish(ctx, f) }.getOrNull()
+        return "PDF saved (${page - 1} pages): ${f.absolutePath}" + (shown?.let { "; the user can find it in $it" } ?: "")
     }
 }
