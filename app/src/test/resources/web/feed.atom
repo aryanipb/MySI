@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Example Engineering Blog</title>
+  <link href="https://blog.example.org/"/>
+  <updated>2026-11-01T10:00:00Z</updated>
+  <entry>
+    <title type="html">Faster builds with &lt;em&gt;incremental&lt;/em&gt; caching</title>
+    <link rel="alternate" href="https://blog.example.org/2026/faster-builds"/>
+    <link rel="edit" href="https://blog.example.org/edit/42"/>
+    <id>tag:blog.example.org,2026:42</id>
+    <published>2026-11-01T10:00:00Z</published>
+    <author><name>Asha Rao</name></author>
+    <summary type="html">&lt;p&gt;We cut build times by &lt;b&gt;60%&lt;/b&gt;.&lt;/p&gt;</summary>
+  </entry>
+  <entry>
+    <title>Second post</title>
+    <link href="https://blog.example.org/2026/second"/>
+    <updated>2026-10-20T08:00:00Z</updated>
+    <content type="html">Plain content.</content>
+  </entry>
+</feed>

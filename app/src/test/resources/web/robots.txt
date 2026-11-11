@@ -1,0 +1,14 @@
+# Example robots.txt
+User-agent: GPTBot
+Disallow: /
+
+User-agent: *
+Disallow: /private/
+Disallow: /search
+Allow: /search/about
+Disallow: /*.json$
+
+User-agent: MySI
+User-agent: OtherBot
+Disallow: /drafts/
+Allow: /drafts/public
