@@ -2,7 +2,7 @@
 
 **Effective date:** 11 November 2026
 
-This policy explains how the MySI Agent app for Android ("MySI", package `com.mysi.agent`) handles your data. MySI is developed by Aryan Babar. For any privacy question or request, email **ceo@finscious.com**.
+This policy explains how the MySI Agent app for Android ("MySI", package `com.mysi.agent`) handles your data. MySI is published on Google Play by **Finscious** and developed by Aryan Babar. For any privacy question or request, email **ceo@finscious.com**.
 
 ## The short version
 
