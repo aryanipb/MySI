@@ -1,5 +1,7 @@
 package com.mysi.agent
 
+import com.mysi.agent.web.HttpClient
+import com.mysi.agent.web.WebSkill
 import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -46,6 +48,19 @@ object Reports {
     /** Returns null on success, or a short reason it failed. */
     suspend fun send(category: String, details: String, reply: String, prompt: String?, model: String?): String? {
         val f = form ?: return "Reporting is not set up in this build."
+        return submit(f, category, details, reply, prompt, model)
+    }
+
+    /** Posts the answers to [f]. [client] is the web skill's client; tests pass one over a fake network. */
+    internal suspend fun submit(
+        f: Form,
+        category: String,
+        details: String,
+        reply: String,
+        prompt: String?,
+        model: String?,
+        client: HttpClient = WebSkill.http,
+    ): String? {
         val answers = buildMap {
             put("category", category)
             put("reply", reply.take(8000))
@@ -58,7 +73,7 @@ object Reports {
             f.entries[key]?.let { "$it=" + URLEncoder.encode(value, "UTF-8") }
         }.joinToString("&")
         return withContext(Dispatchers.IO) {
-            runCatching { Web.request(f.action, body).second }.fold(
+            runCatching { Web.request(f.action, body, client = client).second }.fold(
                 { final ->
                     // A closed form, or one that needs sign-in, redirects elsewhere with a 200 page.
                     if (accepted(f, final.toString())) null
