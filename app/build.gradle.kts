@@ -86,6 +86,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("com.google.code.gson:gson:2.14.0")
+    // PDF text extraction for the Documents and Knowledge base skills (Apache-2.0, pure Java).
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
     testImplementation("junit:junit:4.13.2")
 }
