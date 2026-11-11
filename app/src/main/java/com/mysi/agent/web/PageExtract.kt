@@ -7,7 +7,7 @@ class PageLink(val text: String, val url: String)
 class PageTable(val caption: String, val rows: List<List<String>>) {
     val columns get() = rows.maxOfOrNull { it.size } ?: 0
 
-    /** Compact rows "a | b | c", cut to [maxChars]. */
+    /** Compact rows "a | b | c", at most [maxChars] including the "more rows" note. */
     fun compact(maxChars: Int = 3000, maxRows: Int = Int.MAX_VALUE): String {
         val sb = StringBuilder()
         for ((i, r) in rows.withIndex()) {
@@ -16,7 +16,8 @@ class PageTable(val caption: String, val rows: List<List<String>>) {
                 break
             }
             val line = r.joinToString(" | ") { it.replace('|', '/') }
-            if (sb.length + line.length + 1 > maxChars) {
+            // Leave room for the note that says how many rows were cut.
+            if (sb.length + line.length + 1 > maxChars - 40) {
                 sb.append("… ${rows.size - i} more rows (cut to fit)\n")
                 break
             }
