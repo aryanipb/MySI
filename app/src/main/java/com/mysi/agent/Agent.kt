@@ -118,7 +118,8 @@ object Agent {
         private set
 
     val ready get() = engine != null
-    val busy get() = request != null
+    // A job cancelled before it started never clears [request], so check it is still running.
+    val busy get() = request?.isActive == true
     val toolCount get() = (listOf(Skills.core) + Skills.all).flatMap(::toolsOf).distinctBy { it.name }.size
     val savedModel: String? get() = prefs().getString("model", null)
 
@@ -289,9 +290,10 @@ object Agent {
                         return@withEngine
                     }
                     emit(Event.User(text))
-                    active = Router.merge(router().select(text, MAX_ROUTED), active, MAX_ROUTED)
                     partial = ""
                     try {
+                        // Inside the try: routing builds every skill pack's tools, which may throw.
+                        active = Router.merge(router().select(text, MAX_ROUTED), active, MAX_ROUTED)
                         val r = AgentLoop(maxSteps).run(chat, transcript, text, { partial = it; emit(Event.Partial(it)) }, ::runTool)
                         final = Event.Reply(r.answer, text)
                     } catch (c: CancellationException) {
@@ -523,7 +525,8 @@ object Agent {
         val def = findTool(call.name)
         val result = execute(def, call.name, args)
         if (def?.privateData == true) touchedPrivate = true
-        emit(Event.ToolResult(result))
+        // History lives as long as the process, so it keeps only the start of a result.
+        emit(Event.ToolResult(result.take(3500)))
         return if (call.name == "read_result") ToolOut(call.name, result, "[a page of an earlier result; call read_result again to see it]")
         else results.present(call.name, result)
     }
