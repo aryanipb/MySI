@@ -20,9 +20,15 @@ class PdfSource(file: File, tempDir: File?, private val limits: ReadLimits = Rea
         doc = try {
             PDDocument.load(file, "", memory)
         } catch (e: InvalidPasswordException) {
-            throw IOException("This PDF is password-protected, so MySI cannot read it. Ask the user for an unlocked copy.")
+            throw IOException(PASSWORD)
         } catch (e: IOException) {
+            if (lockedWithCertificate(file)) throw IOException(CERTIFICATE)
             throw IOException("This PDF is damaged or not a PDF (${e.message}).")
+        } catch (e: LinkageError) {
+            // PdfBox needs BouncyCastle, which MySI does not ship, only to decrypt certificate-locked
+            // PDFs; a missing class there must be a plain answer, not a crash.
+            if (lockedWithCertificate(file)) throw IOException(CERTIFICATE)
+            throw IOException("This PDF uses a feature MySI cannot read (${e.javaClass.simpleName}).")
         }
     }
 
@@ -54,5 +60,36 @@ class PdfSource(file: File, tempDir: File?, private val limits: ReadLimits = Rea
     companion object {
         private const val MAIN_MEMORY_BYTES = 16L * 1024 * 1024
         const val NO_TEXT = "(This page has no text layer; it may be a scanned image.)"
+        const val PASSWORD = "This PDF is password-protected, so MySI cannot read it. Ask the user for an unlocked copy."
+        const val CERTIFICATE = "This PDF is locked with a certificate and cannot be opened. Ask the user for an unlocked copy."
+
+        private val PUBLIC_KEY_FILTER = "/Adobe.PubSec".toByteArray(Charsets.ISO_8859_1)
+
+        /**
+         * True when [file] names the public-key (certificate) security handler. PDF never stores
+         * the encryption dictionary in a compressed object stream, so the name is in the raw
+         * bytes. Only checked after opening failed.
+         */
+        internal fun lockedWithCertificate(file: File): Boolean =
+            runCatching {
+                file.inputStream().use { input ->
+                    val buf = ByteArray(64 * 1024)
+                    var matched = 0
+                    var n = input.read(buf)
+                    while (n >= 0) {
+                        for (i in 0 until n) {
+                            // '/' occurs only at the start of the name, so a mismatch restarts there.
+                            matched = when (buf[i]) {
+                                PUBLIC_KEY_FILTER[matched] -> matched + 1
+                                PUBLIC_KEY_FILTER[0] -> 1
+                                else -> 0
+                            }
+                            if (matched == PUBLIC_KEY_FILTER.size) return@use true
+                        }
+                        n = input.read(buf)
+                    }
+                    false
+                }
+            }.getOrDefault(false)
     }
 }
