@@ -5,7 +5,8 @@ where it comes from and under which licence. Sections are added as features land
 
 ## Senses: vision and hearing
 
-Everything in this section runs on the phone. Photos and recordings are never uploaded.
+Everything in this section runs on the phone. Photos, camera frames and recordings are never
+uploaded.
 
 ### Libraries
 
@@ -14,10 +15,12 @@ Everything in this section runs on the phone. Photos and recordings are never up
 | MediaPipe Tasks Vision (`com.google.mediapipe:tasks-vision`) | 0.10.35 | Apache-2.0 | https://github.com/google-ai-edge/mediapipe |
 | MediaPipe Tasks Audio (`com.google.mediapipe:tasks-audio`) | 0.10.35 | Apache-2.0 | https://github.com/google-ai-edge/mediapipe |
 | MediaPipe Tasks Core (`com.google.mediapipe:tasks-core`, pulled in by the two above) | 0.10.35 | Apache-2.0 | https://github.com/google-ai-edge/mediapipe |
+| CameraX core, camera2, lifecycle, view (`androidx.camera:*`) | 1.6.2 | Apache-2.0 | https://developer.android.com/jetpack/androidx/releases/camera |
 
 MediaPipe Tasks also brings in Guava, Flogger, protobuf-javalite, Google's datatransport library
 and its firebase-encoders, and AutoValue annotations (all Apache-2.0, except protobuf-javalite:
-BSD-3-Clause). MediaPipe uses datatransport to report
+BSD-3-Clause). CameraX brings in camera-video, camera-camera2-pipe, viewfinder-core,
+featurecombinationquery and concurrent-futures (all Apache-2.0). MediaPipe uses datatransport to report
 usage statistics to Google; MySI unregisters datatransport's upload backend in its manifest, so
 those reports are dropped on the phone and never sent.
 

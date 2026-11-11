@@ -7,6 +7,7 @@ import com.mysi.agent.Skills
 import com.mysi.agent.TestContext
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -64,8 +65,13 @@ class SensesManifestTest {
     }
 
     @Test
-    fun theMicrophoneIsDeclaredOnceAndOptional() {
-        assertEquals(1, Regex("uses-permission android:name=\"android.permission.RECORD_AUDIO\"").findAll(manifest).count())
+    fun cameraAndMicrophoneAreDeclaredOnceAndOptional() {
+        for (p in listOf("android.permission.CAMERA", "android.permission.RECORD_AUDIO"))
+            assertEquals(p, 1, Regex("uses-permission android:name=\"$p\"").findAll(manifest).count())
+        assertTrue(manifest.contains("<uses-feature android:name=\"android.hardware.camera\" android:required=\"false\" />"))
         assertTrue(manifest.contains("<uses-feature android:name=\"android.hardware.microphone\" android:required=\"false\" />"))
+        val live = manifest.substringAfter("android:name=\".senses.LiveVisionActivity\"").substringBefore("/>")
+        assertTrue(live, live.contains("android:exported=\"false\""))
+        assertFalse(live.contains("intent-filter"))
     }
 }

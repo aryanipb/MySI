@@ -111,6 +111,12 @@ dependencies {
     // AndroidManifest.xml.
     implementation("com.google.mediapipe:tasks-vision:0.10.35")
     implementation("com.google.mediapipe:tasks-audio:0.10.35")
+    // CameraX (Apache-2.0) for the live vision screen.
+    val cameraX = "1.6.2"
+    implementation("androidx.camera:camera-core:$cameraX")
+    implementation("androidx.camera:camera-camera2:$cameraX")
+    implementation("androidx.camera:camera-lifecycle:$cameraX")
+    implementation("androidx.camera:camera-view:$cameraX")
 
     testImplementation("junit:junit:4.13.2")
 }

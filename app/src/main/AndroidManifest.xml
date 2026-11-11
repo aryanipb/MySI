@@ -19,9 +19,10 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <!--
-    Senses, asked for in context: the microphone when the user agrees to a recording. Sound is
-    processed on the phone and never uploaded.
+    Senses, asked for in context: the camera for the live vision screen, the microphone when the
+    user agrees to a recording. Pictures and sound are processed on the phone and never uploaded.
     -->
+    <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
@@ -63,6 +64,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Live camera view with object detection; returns a saved frame. Opened only by MySI. -->
+        <activity
+            android:name=".senses.LiveVisionActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme" />
 
         <receiver
             android:name=".ApprovalReceiver"
