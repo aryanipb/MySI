@@ -35,6 +35,9 @@ class MainActivity : UiActivity(), Host {
     private lateinit var status: TextView
     private lateinit var log: LinearLayout
     private lateinit var input: EditText
+    private lateinit var sendButton: TextView
+    /** The reply card being streamed into, and its text. */
+    private var live: Pair<LinearLayout, TextView>? = null
     private var dialog: Pair<AlertDialog, CancellableContinuation<Boolean>>? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -68,6 +71,7 @@ class MainActivity : UiActivity(), Host {
         Agent.attach(this)
         Agent.history.forEach(::render)
         Agent.listener = ::render
+        syncBusy()
         if (!Agent.ready) {
             val saved = Agent.savedModel
             if (saved != null && File(saved).canRead()) Agent.scope.launch { Agent.load(saved) }
@@ -121,13 +125,21 @@ class MainActivity : UiActivity(), Host {
             contentDescription = "Speak"
             layoutParams = LinearLayout.LayoutParams(dp(52), dp(48)).apply { marginStart = dp(8) }
         }
-        button(bar, "Send", true) { send() }.layoutParams =
-            LinearLayout.LayoutParams(-2, dp(48)).apply { marginStart = dp(8) }
+        sendButton = button(bar, "Send", true) { if (Agent.busy) Agent.stop() else send() }
+        sendButton.layoutParams = LinearLayout.LayoutParams(-2, dp(48)).apply { marginStart = dp(8) }
+    }
+
+    /** Send turns into Stop while a request runs. */
+    private fun syncBusy() {
+        val label = if (Agent.busy) "Stop" else "Send"
+        sendButton.text = label
+        sendButton.contentDescription = label
     }
 
     private fun send() {
         val q = input.text.toString().trim()
         if (q.isEmpty()) return
+        if (Agent.busy) return toast("MySI is still working. Wait, or tap Stop.")
         input.setText("")
         if (!Agent.ready) return toast("Load a model first.")
         // Approvals arrive as notifications when another app is in front. Ask once, before the
@@ -146,7 +158,14 @@ class MainActivity : UiActivity(), Host {
 
     private fun start(q: String) {
         status.text = "Thinking…"
-        Agent.scope.launch { Agent.ask(q) }
+        Agent.submit(q)
+        syncBusy()
+    }
+
+    /** Removes the streaming card; only finished replies, which can be reported, stay in the log. */
+    private fun dropLive() {
+        live?.let { log.removeView(it.first) }
+        live = null
     }
 
     private fun render(e: Event) {
@@ -157,9 +176,21 @@ class MainActivity : UiActivity(), Host {
                     text(it, "You", 11f, muted, bold = true)
                     text(it, e.text, 15f)
                 }
-            is Event.ToolCall -> text(log, "⚙  ${e.name}(${e.args})", 12f, muted).typeface = Typeface.MONOSPACE
+            is Event.Partial -> {
+                val (_, body) = live ?: card(log).let { c ->
+                    text(c, "MySI", 11f, muted, bold = true).typeface = serif
+                    (c to text(c, "", 15f)).also { live = it }
+                }
+                body.text = e.text
+            }
+            is Event.Progress -> status.text = e.text
+            is Event.ToolCall -> {
+                dropLive()
+                text(log, "⚙  ${e.name}(${e.args})", 12f, muted).typeface = Typeface.MONOSPACE
+            }
             is Event.ToolResult -> text(log, "↳ ${e.text.take(700)}", 12f, muted).apply { setPadding(dp(14), 0, 0, 0) }
             is Event.Reply -> {
+                dropLive()
                 card(log).also {
                     text(it, "MySI", 11f, muted, bold = true).typeface = serif
                     text(it, e.text, 15f)
@@ -176,10 +207,12 @@ class MainActivity : UiActivity(), Host {
                 status.text = "Ready · ${Agent.backend} · ${Agent.toolCount} tools"
             }
             is Event.Error -> {
+                dropLive()
                 text(log, "⚠ ${e.text}", 13f, Color.rgb(255, 160, 150))
                 status.text = "Error"
             }
         }
+        syncBusy()
         scroll.post { scroll.fullScroll(android.view.View.FOCUS_DOWN) }
     }
 
