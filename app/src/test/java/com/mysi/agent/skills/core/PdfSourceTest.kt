@@ -23,6 +23,24 @@ class PdfSourceTest {
     }
 
     @Test
+    fun aPdfThatNeedsAPasswordIsAClearRefusal() {
+        try {
+            PdfSource(fixture("locked.pdf"), null).close()
+            org.junit.Assert.fail("opened without a password")
+        } catch (e: java.io.IOException) {
+            assertTrue(e.message!!, e.message!!.contains("password-protected"))
+        }
+    }
+
+    @Test
+    fun aPdfWithOnlyAnOwnerPasswordStillReads() {
+        // Encrypted (RC4) with permissions only, like many bank statements: opens without a password.
+        PdfSource(fixture("protected.pdf"), null).use { pdf ->
+            assertTrue(pdf.part(0).text.contains("Nitrate levels exceeded"))
+        }
+    }
+
+    @Test
     fun readsEmbeddedFontPdfFromAnOfficeSuite() {
         PdfSource(fixture("report.pdf"), null).use { pdf ->
             val text = pdf.part(0).text

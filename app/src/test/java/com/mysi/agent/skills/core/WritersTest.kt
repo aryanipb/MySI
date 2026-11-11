@@ -95,6 +95,8 @@ class WritersTest {
         assertTrue(runs, runs.contains("d&lt;e&gt;"))
         // Arithmetic, identifiers and unclosed markers stay as typed.
         assertTrue(runs, runs.contains("2*3*4 snake_case_name **open"))
+        // Schema order inside w:rPr: rFonts before b before i.
+        assertTrue(DocxWriter.runs("***`x`***").contains("<w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\" w:cs=\"Consolas\"/><w:b/><w:i/></w:rPr>"))
         val withControl = DocxWriter.write("T", "bad" + Char(7) + "char", created)
         checkPackage(save("ctl.docx", withControl), listOf("word/document.xml"))
     }

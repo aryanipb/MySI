@@ -174,10 +174,11 @@ object DocxWriter {
         val buf = StringBuilder()
         fun emit() {
             if (buf.isEmpty()) return
+            // ECMA-376 fixes the order inside w:rPr: rFonts, then b, then i.
             val rpr = StringBuilder()
+            if (code) rpr.append("<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\" w:cs=\"Consolas\"/>")
             if (bold) rpr.append("<w:b/>")
             if (italic) rpr.append("<w:i/>")
-            if (code) rpr.append("<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\" w:cs=\"Consolas\"/>")
             val pieces = buf.toString().split('\n')
             sb.append("<w:r>")
             if (rpr.isNotEmpty()) sb.append("<w:rPr>").append(rpr).append("</w:rPr>")

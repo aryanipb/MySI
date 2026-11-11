@@ -149,7 +149,8 @@ object DocxReader {
             when (x.next()) {
                 XmlPull.Event.EOF -> break@loop
                 XmlPull.Event.START -> when (x.name) {
-                    "Fallback" -> x.skipElement()
+                    // Tab-stop definitions (w:tabs/w:tab in paragraph properties) are not tab characters.
+                    "Fallback", "tabs" -> x.skipElement()
                     "p" -> paras.addLast(Para())
                     "t" -> inText = true
                     "tab" -> paras.lastOrNull()?.text?.append('\t')
@@ -564,7 +565,8 @@ object PptxReader {
             when (x.next()) {
                 XmlPull.Event.EOF -> break@loop
                 XmlPull.Event.START -> when (x.name) {
-                    "Fallback" -> x.skipElement()
+                    // a:tabLst holds tab-stop definitions, not tab characters.
+                    "Fallback", "tabLst" -> x.skipElement()
                     "sp" -> { shapeDepth++; shapeSkipped = false }
                     "ph" -> if (x.attr("type") in skippedPlaceholders) shapeSkipped = true
                     "p" -> para = StringBuilder()
