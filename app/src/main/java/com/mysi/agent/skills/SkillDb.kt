@@ -7,6 +7,7 @@ import android.database.DatabaseUtils
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import androidx.core.database.sqlite.transaction
+import com.mysi.agent.search.Posting
 import com.mysi.agent.skills.core.KbChunk
 import com.mysi.agent.skills.core.KbChunkInput
 import com.mysi.agent.skills.core.KbDoc
@@ -15,7 +16,6 @@ import com.mysi.agent.skills.core.MemoryItem
 import com.mysi.agent.skills.core.MemoryStore
 import com.mysi.agent.skills.core.Note
 import com.mysi.agent.skills.core.PlannerStore
-import com.mysi.agent.skills.core.Posting
 import com.mysi.agent.skills.core.Task
 import java.io.File
 

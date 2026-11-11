@@ -1,7 +1,13 @@
-package com.mysi.agent.skills.core
+package com.mysi.agent.search
 
 import java.text.Normalizer
 import kotlin.math.ln
+
+/*
+ * Search shared by the whole app: one tokenizer for the user's own text ([Tokens]) and one BM25
+ * scorer ([Bm25], [Bm25Ranker]) used by the knowledge base, document and note search, the web
+ * skill's page and research ranking, and the skill router. Pure Kotlin, no Android types.
+ */
 
 /**
  * Search terms from text: Unicode-aware words (combining marks kept, so Hindi and Tamil words
@@ -105,23 +111,39 @@ interface Ranker {
     fun rank(query: String, limit: Int): List<Scored>
 }
 
-/** Okapi BM25 with the usual k1 = 1.2, b = 0.75. */
-class Bm25Ranker(private val index: TermIndex, private val k1: Double = 1.2, private val b: Double = 0.75) : Ranker {
+/** The Okapi BM25 formula, in one place for every ranker in the app. */
+object Bm25 {
+    const val K1 = 1.2
+    const val B = 0.75
+
+    /** Inverse document frequency of a term found in [withTerm] of [documents] documents (always positive). */
+    fun idf(documents: Int, withTerm: Int): Double = ln(1.0 + (documents - withTerm + 0.5) / (withTerm + 0.5))
+
+    /** One term's contribution to a document's score. */
+    fun weight(tf: Double, idf: Double, length: Double, averageLength: Double, k1: Double = K1, b: Double = B): Double =
+        idf * tf * (k1 + 1) / (tf + k1 * (1 - b + b * length / averageLength))
+}
+
+/**
+ * Okapi BM25 over a [TermIndex]. [terms] must be the tokenizer the index was built with: the
+ * user's documents, notes and memories use [Tokens]; web pages use the web skill's own terms.
+ */
+class Bm25Ranker(
+    private val index: TermIndex,
+    private val k1: Double = Bm25.K1,
+    private val b: Double = Bm25.B,
+    private val terms: (String) -> List<String> = Tokens::of,
+) : Ranker {
     override fun rank(query: String, limit: Int): List<Scored> {
         val n = index.documentCount
         if (n == 0 || limit <= 0) return emptyList()
         val avg = index.averageLength.coerceAtLeast(1.0)
         val scores = HashMap<Long, Double>()
-        for (term in Tokens.of(query, MAX_QUERY_TERMS).distinct()) {
+        for (term in terms(query).distinct().take(MAX_QUERY_TERMS)) {
             val postings = index.postings(term)
             if (postings.isEmpty()) continue
-            val df = postings.size
-            val idf = ln(1.0 + (n - df + 0.5) / (df + 0.5))
-            for (p in postings) {
-                val tf = p.tf.toDouble()
-                val s = idf * tf * (k1 + 1) / (tf + k1 * (1 - b + b * p.length / avg))
-                scores[p.id] = (scores[p.id] ?: 0.0) + s
-            }
+            val idf = Bm25.idf(n, postings.size)
+            for (p in postings) scores[p.id] = (scores[p.id] ?: 0.0) + Bm25.weight(p.tf.toDouble(), idf, p.length.toDouble(), avg, k1, b)
         }
         return scores.entries
             .sortedWith(compareByDescending<Map.Entry<Long, Double>> { it.value }.thenBy { it.key })
@@ -134,8 +156,8 @@ class Bm25Ranker(private val index: TermIndex, private val k1: Double = 1.2, pri
     }
 }
 
-/** An in-memory index for small collections (memories, notes, one document) and for tests. */
-class MemoryIndex : TermIndex {
+/** An in-memory index for small collections (memories, notes, one document, a set of web pages). */
+class MemoryIndex(private val terms: (String) -> List<String> = Tokens::of) : TermIndex {
     private val docs = HashMap<Long, Map<String, Int>>()
     private val lengths = HashMap<Long, Int>()
     private val inverted = HashMap<String, MutableMap<Long, Int>>()
@@ -143,7 +165,7 @@ class MemoryIndex : TermIndex {
 
     fun add(id: Long, text: String) {
         remove(id)
-        val c = Tokens.counts(text)
+        val c = terms(text).groupingBy { it }.eachCount()
         docs[id] = c
         val len = c.values.sum()
         lengths[id] = len

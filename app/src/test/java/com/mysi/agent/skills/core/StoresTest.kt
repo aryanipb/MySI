@@ -1,5 +1,7 @@
 package com.mysi.agent.skills.core
 
+import com.mysi.agent.search.Ranker
+import com.mysi.agent.search.Scored
 import com.mysi.agent.skills.core.TestFiles.fixture
 import java.time.LocalDate
 import java.time.LocalDateTime

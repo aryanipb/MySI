@@ -241,13 +241,13 @@ class DeepResearch(
 
         // 5–9. Per sub-question: rank chunks, extract claims, verify quotes.
         val chunks = reads.flatMap { r -> Chunker.chunks(r.page.text, 900).map { r to it } }
-        val bm = Bm25(chunks.map { it.second })
+        val ranked = chunks.map { it.second }
         val verified = mutableListOf<ResearchClaim>()
         val unverified = mutableListOf<ResearchClaim>()
         subQs.forEachIndexed { i, sq ->
             coroutineContext.ensureActive()
             emit(ResearchProgress.Step.EXTRACTING, "Finding facts for: $sq", i, subQs.size)
-            val evidence = selectEvidence(bm, chunks, sq, depth)
+            val evidence = selectEvidence(ranked, chunks, sq, depth)
             if (evidence.isEmpty()) return@forEachIndexed
             val raw = ask(EXTRACT_SYSTEM, extractPrompt(q, sq, evidence)) ?: return@forEachIndexed
             for (c in parseClaims(raw).take(8)) {
@@ -330,11 +330,11 @@ class DeepResearch(
         return chosen.values.toList()
     }
 
-    private fun selectEvidence(bm: Bm25, chunks: List<Pair<Read, String>>, subQ: String, depth: ResearchDepth): List<Pair<Read, String>> {
+    private fun selectEvidence(texts: List<String>, chunks: List<Pair<Read, String>>, subQ: String, depth: ResearchDepth): List<Pair<Read, String>> {
         val out = mutableListOf<Pair<Read, String>>()
         val perSource = HashMap<Read, Int>()
         var chars = 0
-        for ((idx, _) in bm.rank(subQ)) {
+        for ((idx, _) in WebTerms.rank(texts, subQ)) {
             if (out.size >= depth.evidenceChunks) break
             val (r, text) = chunks[idx]
             if ((perSource[r] ?: 0) >= 2 || chars + text.length > MAX_EVIDENCE_CHARS) continue
@@ -442,9 +442,9 @@ class DeepResearch(
         val quoteWords = QuoteVerifier.words(quote).toSet()
         val numbers = QuoteVerifier.words(claim).filter { w -> w.any { it.isDigit() } || w in NUMBER_WORDS }
         if (numbers.any { it !in quoteWords }) return false
-        val claimTerms = Bm25.tokens(claim).toSet()
+        val claimTerms = WebTerms.of(claim).toSet()
         if (claimTerms.isEmpty()) return false
-        val quoteTerms = Bm25.tokens(quote).toSet()
+        val quoteTerms = WebTerms.of(quote).toSet()
         return claimTerms.count { it in quoteTerms }.toDouble() / claimTerms.size >= 1.0 / 3
     }
 

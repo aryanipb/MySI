@@ -1,5 +1,7 @@
 package com.mysi.agent.skills.core
 
+import com.mysi.agent.search.Posting
+
 /** In-memory stand-ins for the SQLite stores, so the logic above SQL is tested on the JVM. */
 class FakeKbStore : KbStore {
     private val docs = LinkedHashMap<String, KbDoc>()

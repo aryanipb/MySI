@@ -141,13 +141,13 @@ object PageExtract {
         val chosen: List<IndexedValue<String>> =
             if (exact.isNotEmpty()) exact.take(max)
             else {
-                val terms = Bm25.tokens(q).toSet()
+                val terms = WebTerms.of(q).toSet()
                 if (terms.isEmpty()) return emptyList()
                 val need = if (terms.size <= 2) terms.size else (terms.size + 1) / 2
-                val bm = Bm25(passages)
+                val scores = WebTerms.rank(passages, q).toMap()
                 passages.indices
-                    .filter { i -> Bm25.tokens(passages[i]).toSet().count { it in terms } >= need }
-                    .map { it to bm.score(q, it) }
+                    .filter { i -> WebTerms.of(passages[i]).toSet().count { it in terms } >= need }
+                    .map { it to (scores[it] ?: 0.0) }
                     .sortedByDescending { it.second }
                     .take(max)
                     .map { IndexedValue(it.first, passages[it.first]) }

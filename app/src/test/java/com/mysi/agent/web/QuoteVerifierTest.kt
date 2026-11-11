@@ -70,11 +70,10 @@ class QuoteVerifierTest {
             "Battery storage prices fell sharply as lithium costs dropped.",
             "Charging an electric scooter at home costs less than petrol.",
         )
-        val bm = Bm25(docs)
-        assertEquals(1, bm.rank("why did batteries get cheaper")[0].first)
-        assertEquals(2, bm.rank("scooter charge cost")[0].first)
-        assertTrue(bm.rank("volcano eruption").isEmpty())
-        assertEquals(listOf("battery", "charg"), Bm25.tokens("the batteries charging").let { listOf(it[0], it[1]) })
+        assertEquals(1, WebTerms.rank(docs, "why did batteries get cheaper")[0].first)
+        assertEquals(2, WebTerms.rank(docs, "scooter charge cost")[0].first)
+        assertTrue(WebTerms.rank(docs, "volcano eruption").isEmpty())
+        assertEquals(listOf("battery", "charg"), WebTerms.of("the batteries charging").let { listOf(it[0], it[1]) })
     }
 
     @Test

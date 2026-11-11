@@ -1,5 +1,9 @@
 package com.mysi.agent.skills.core
 
+import com.mysi.agent.search.Bm25Ranker
+import com.mysi.agent.search.MemoryIndex
+import com.mysi.agent.search.Posting
+import com.mysi.agent.search.Tokens
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

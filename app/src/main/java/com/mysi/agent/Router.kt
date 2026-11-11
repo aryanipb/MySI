@@ -1,6 +1,6 @@
 package com.mysi.agent
 
-import kotlin.math.ln
+import com.mysi.agent.search.Bm25
 
 /** The parts of a [Skill] the router reads, kept free of Android types so it can be unit-tested. */
 data class SkillCard(
@@ -12,8 +12,10 @@ data class SkillCard(
 )
 
 /**
- * Picks the skills that fit a request with BM25 over weighted fields: the skill's name and
- * keywords count most, then its description and tool names, then its tools' descriptions.
+ * Picks the skills that fit a request with BM25 (the app's one formula, [Bm25]) over weighted
+ * fields: the skill's name and keywords count most, then its description and tool names, then its
+ * tools' descriptions. It has its own terms ([terms]): routing drops request words such as
+ * "open", "show" and "find" that say nothing about which skill is meant.
  * Deterministic: equal scores keep the order of [cards]. No match means an empty list; deciding
  * what to load then (for example keeping the previous skills on a follow-up) is the caller's job.
  */
@@ -37,14 +39,12 @@ class Router(private val cards: List<SkillCard>) {
     fun rank(request: String): List<Pair<String, Double>> {
         val q = terms(request).distinct()
         if (q.isEmpty()) return emptyList()
-        val n = docs.size.toDouble()
+        val n = docs.size
         return docs
             .map { d ->
                 d.name to q.sumOf { t ->
                     val f = d.tf[t] ?: return@sumOf 0.0
-                    val nt = df.getValue(t).toDouble()
-                    val idf = ln(1 + (n - nt + 0.5) / (nt + 0.5))
-                    idf * f * (K1 + 1) / (f + K1 * (1 - B + B * d.length / avgLength))
+                    Bm25.weight(f, Bm25.idf(n, df.getValue(t)), d.length, avgLength, K1, B)
                 }
             }
             .filter { it.second > 0.0 }
@@ -60,7 +60,8 @@ class Router(private val cards: List<SkillCard>) {
     }
 
     companion object {
-        private const val K1 = 1.2
+        private const val K1 = Bm25.K1
+        /** Lower than the usual 0.75: a skill with many tools should not lose much for its long text. */
         private const val B = 0.5
 
         /**
