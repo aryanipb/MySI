@@ -67,6 +67,16 @@ class SkillsTest {
     }
 
     @Test
+    fun theSystemPromptOnlyNamesToolsThatExist() {
+        val agent = source("Agent.kt")
+        val prompt = agent.substring(agent.indexOf("You are MySI"), agent.indexOf("\"\"\".trimIndent()", agent.indexOf("You are MySI")))
+        val named = Regex("""\b([a-z]+_[a-z_]+)\b""").findAll(prompt).map { it.groupValues[1] }.toSet()
+        assertTrue(named.toString(), named.isNotEmpty())
+        val tools = registry.flatMap { it.second }.toSet()
+        assertTrue("the system prompt names unknown tools: ${named - tools}", tools.containsAll(named))
+    }
+
+    @Test
     fun skillInstructionsOnlyNameToolsThatExist() {
         val tools = registry.flatMap { it.second }.toSet()
         // snake_case words followed by "(" or used as tool names in instructions.
