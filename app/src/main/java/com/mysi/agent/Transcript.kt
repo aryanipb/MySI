@@ -20,7 +20,7 @@ object Tokens {
     fun estimate(e: Entry): Int =
         // A few tokens per message for the chat template's role markers.
         4 + when (e) {
-            is Entry.User -> estimate(e.text)
+            is Entry.User -> estimate(e.text) + e.attachments.sumOf(Attachments::tokens)
             is Entry.Model -> estimate(e.text) + e.calls.sumOf { estimate(it.name) + estimate(it.args.toString()) + 4 }
             is Entry.Tool -> e.outs.sumOf { estimate(it.name) + estimate(it.text) + 4 }
         }
@@ -37,7 +37,12 @@ data class Call(val name: String, val args: Map<String, Any?>)
 data class ToolOut(val name: String, val text: String, val stub: String = text)
 
 sealed class Entry {
-    data class User(val text: String) : Entry()
+    /**
+     * A request. [attachments] are the pictures and recordings the model takes with it; they are
+     * kept only while the turn is open (see [ContextManager.compact]), and [text] already lists
+     * them as paths, so later turns replay a short text reference instead of the media.
+     */
+    data class User(val text: String, val attachments: List<Attachment> = emptyList()) : Entry()
 
     data class Model(val text: String, val calls: List<Call> = emptyList()) : Entry()
 
@@ -75,9 +80,9 @@ class Transcript(private val maxTurns: Int = 60, private val summarizer: Summari
 
     val size get() = turns.sumOf { it.entries.size }
 
-    fun begin(request: String) {
+    fun begin(request: String, attachments: List<Attachment> = emptyList()) {
         closeTurn("Not run: the request ended.", "")
-        turns += Turn(Entry.User(request))
+        turns += Turn(Entry.User(request, attachments))
         open = true
         if (turns.size > maxTurns) {
             val dropped = turns.subList(0, turns.size - maxTurns)
@@ -198,9 +203,19 @@ class ContextManager(private val summarizer: Summarizer = TruncatingSummarizer, 
         return Replay(summary, entries, used + Tokens.estimate(summary))
     }
 
-    /** Finished turns replay tool results as stubs; the full text stays reachable via read_result. */
+    /**
+     * Finished turns replay tool results as stubs (the full text stays reachable via read_result)
+     * and requests without their media: the request text already names each attachment by path,
+     * so a rebuilt conversation stays small and never holds more than the open turn's images.
+     */
     internal fun compact(entries: List<Entry>): List<Entry> =
-        entries.map { e -> if (e is Entry.Tool) Entry.Tool(e.outs.map { it.copy(text = it.stub) }) else e }
+        entries.map { e ->
+            when {
+                e is Entry.Tool -> Entry.Tool(e.outs.map { it.copy(text = it.stub) })
+                e is Entry.User && e.attachments.isNotEmpty() -> e.copy(attachments = emptyList())
+                else -> e
+            }
+        }
 
     /** Stubs the open turn's tool results, oldest first, until it fits; the latest step stays whole. */
     internal fun fitOpen(entries: List<Entry>, budget: Int): List<Entry> {

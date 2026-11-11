@@ -34,10 +34,11 @@ class AgentLoop(private val maxSteps: Int = DEFAULT_MAX_STEPS) {
         transcript: Transcript,
         request: String,
         onText: (String) -> Unit,
+        attachments: List<Attachment> = emptyList(),
         execute: suspend (Call) -> ToolOut,
     ): LoopResult {
-        transcript.begin(request)
-        var reply = send(chat, transcript, Entry.User(request), onText, recorded = true)
+        transcript.begin(request, attachments)
+        var reply = send(chat, transcript, transcript.last!!, onText, recorded = true)
         var steps = 0
         var capped = false
         while (reply.calls.isNotEmpty()) {

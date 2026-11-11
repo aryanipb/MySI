@@ -1,5 +1,9 @@
 package com.mysi.agent
 
+import com.mysi.agent.senses.Media
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
 /**
  * Runs one model sub-step outside the chat: a fresh, tool-less conversation with [system] as its
  * instruction answers [prompt] and is closed afterwards. It never overlaps another generation,
@@ -8,6 +12,36 @@ package com.mysi.agent
  */
 suspend fun Agent.complete(system: String, prompt: String, maxOutputTokens: Int? = null): String =
     generate(system, prompt, maxOutputTokens)
+
+/** Thrown by a model call that needs a sense (vision or hearing) the loaded model does not have. */
+class SenseUnavailable(message: String) : IllegalStateException(message)
+
+/**
+ * [complete] with pictures and recordings: the model gets [media] (each picture as an upright
+ * JPEG at most 1,024 pixels on its longest side, each recording's first
+ * [Attachments.AUDIO_CLIP_SECONDS] as 16 kHz mono WAV) ahead of [prompt] in one message. Same
+ * engine rules as [complete]. Throws [SenseUnavailable] when the loaded model cannot see or hear
+ * what [media] holds, and IOException when a file cannot be read.
+ */
+suspend fun Agent.complete(system: String, prompt: String, media: List<Attachment>, maxOutputTokens: Int? = null): String {
+    val pictures = media.filterIsInstance<Attachment.Image>()
+    val sounds = media.filterIsInstance<Attachment.Audio>()
+    if (pictures.isNotEmpty() && !canSee) throw SenseUnavailable(NO_VISION)
+    if (sounds.isNotEmpty() && !canHear) throw SenseUnavailable(NO_HEARING)
+    val (images, audio) = withContext(Dispatchers.IO) {
+        pictures.map { Media.modelJpeg(it.file) } to sounds.map { Media.modelWav(it.file, Attachments.AUDIO_CLIP_SECONDS) }
+    }
+    return generate(system, prompt, maxOutputTokens, images, audio)
+}
+
+/** [complete] with one prepared audio clip: [wav] is a 16 kHz mono 16-bit WAV of at most [Attachments.AUDIO_CLIP_SECONDS]. */
+internal suspend fun Agent.completeWithAudio(system: String, prompt: String, wav: ByteArray, maxOutputTokens: Int? = null): String {
+    if (!canHear) throw SenseUnavailable(NO_HEARING)
+    return generate(system, prompt, maxOutputTokens, audio = listOf(wav))
+}
+
+internal const val NO_VISION = "The loaded model cannot see images. Load a Gemma model with vision to use this."
+internal const val NO_HEARING = "The loaded model cannot hear audio. Load a Gemma model with audio to use this."
 
 /**
  * Map-reduce over [chunks]: each chunk is processed with [mapPrompt], then the results are
@@ -42,10 +76,27 @@ object Pipelines {
     ): String {
         val input = chunks.filter { it.isNotBlank() }
         if (input.isEmpty()) return ""
-        var parts = input.mapIndexed { i, c ->
+        val parts = input.mapIndexed { i, c ->
             progress("Reading part ${i + 1} of ${input.size}…")
             complete("$mapPrompt\n\n---\n$c").trim()
         }
+        return reduce(parts, reducePrompt, complete, budgetTokens, progress)
+    }
+
+    /**
+     * The reduce half of [mapReduce]: combines [mapped] results with [reducePrompt], in several
+     * rounds if they are too long for one step. Used directly when the map step was not text
+     * (each part of a recording, for example).
+     */
+    suspend fun reduce(
+        mapped: List<String>,
+        reducePrompt: String,
+        complete: suspend (String) -> String,
+        budgetTokens: Int = REDUCE_INPUT_TOKENS,
+        progress: (String) -> Unit = {},
+    ): String {
+        if (mapped.isEmpty()) return ""
+        var parts = mapped
         var round = 1
         while (joinedTokens(parts) > budgetTokens) {
             val batches = batch(parts, budgetTokens)
