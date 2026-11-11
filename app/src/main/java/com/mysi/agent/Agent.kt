@@ -19,13 +19,13 @@ import com.google.ai.edge.litertlm.OpenApiTool
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.ToolCall
 import com.google.ai.edge.litertlm.tool
+import com.mysi.agent.web.Llm
+import com.mysi.agent.web.WebSkill
 import java.lang.ref.WeakReference
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.IdentityHashMap
 import java.util.Locale
-import kotlin.coroutines.AbstractCoroutineContextElement
-import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -82,7 +82,7 @@ object Agent {
     private val main = Handler(Looper.getMainLooper())
 
     /** Held for a whole request, model load, New chat, or a pipeline started outside a request. */
-    private val lock = Mutex()
+    private val lock = EngineLock()
 
     /** Held for each single engine operation; never while a tool runs, so tools can run pipelines. */
     private val gen = Mutex()
@@ -126,6 +126,10 @@ object Agent {
 
     fun init(context: Context) {
         app = context.applicationContext
+        // Deep research calls the model from inside its tool's run, so it reuses the request's
+        // hold on the engine (see EngineLock); it must never call it from another scope.
+        WebSkill.llm = Llm { system, prompt -> complete(system, prompt) }
+        WebSkill.onProgress = ::progress
     }
 
     fun attach(host: Host?) {
@@ -148,14 +152,8 @@ object Agent {
     /** Reports a step of a long job (e.g. a pipeline) on the status line. */
     fun progress(text: String) = emit(Event.Progress(text))
 
-    /** Marks a coroutine that holds [lock], so nested calls from a tool's run do not wait on it. */
-    private class EngineHeld : AbstractCoroutineContextElement(EngineHeld) {
-        companion object Key : CoroutineContext.Key<EngineHeld>
-    }
-
-    private suspend fun <T> withEngine(block: suspend () -> T): T =
-        if (currentCoroutineContext()[EngineHeld] != null) block()
-        else lock.withLock { withContext(EngineHeld()) { block() } }
+    /** Takes [lock], or passes through when this coroutine already holds it (a tool's run inside a request). */
+    private suspend fun <T> withEngine(block: suspend () -> T): T = lock.withEngine(block)
 
     /** Loads the model, preferring the GPU and falling back to the CPU. Returns true when ready. */
     suspend fun load(path: String): Boolean =
@@ -213,12 +211,13 @@ object Agent {
         }
     }
 
-    /** Forgets the chat: its turns, stored tool results, loaded skills and private-data flag. */
+    /** Forgets the chat: its turns, stored tool results, loaded skills, private-data flag and cached web pages. */
     private fun resetChat() {
         touchedPrivate = false
         transcript.clear()
         results.clear()
         active = emptyList()
+        WebSkill.newSession()
     }
 
     private fun closeConversation() {
