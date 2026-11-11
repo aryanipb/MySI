@@ -1,5 +1,7 @@
 package com.mysi.agent.skills.core
 
+import com.mysi.agent.web.Entities
+
 /** Visible text of an HTML page: no scripts, styles or markup; headings and list items kept. */
 object HtmlText {
     data class Result(val title: String?, val blocks: List<Block>)
@@ -93,7 +95,7 @@ object HtmlText {
                     if (!closing && name == "li") sb.append("• ")
                 }
                 name == "td" || name == "th" -> if (!closing && sb.isNotEmpty()) sb.append(" | ")
-                name == "img" && !closing -> Regex("""alt\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(tag)?.let { sb.append(' ').append(decodeEntities(it.groupValues[1])).append(' ') }
+                name == "img" && !closing -> Regex("""alt\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(tag)?.let { sb.append(' ').append(Entities.decode(it.groupValues[1], inAttribute = true)).append(' ') }
             }
         }
         flush()
@@ -115,29 +117,6 @@ object HtmlText {
         return -1
     }
 
-    private val named = mapOf(
-        "amp" to "&", "lt" to "<", "gt" to ">", "quot" to "\"", "apos" to "'", "nbsp" to Char(0xA0).toString(), "copy" to "©",
-        "reg" to "®", "trade" to "™", "hellip" to "…", "mdash" to "—", "ndash" to "–", "lsquo" to "‘", "rsquo" to "’",
-        "ldquo" to "“", "rdquo" to "”", "bull" to "•", "middot" to "·", "deg" to "°", "euro" to "€", "pound" to "£",
-        "yen" to "¥", "cent" to "¢", "rupee" to "₹", "sect" to "§", "para" to "¶", "times" to "×", "divide" to "÷",
-        "laquo" to "«", "raquo" to "»", "shy" to "", "zwnj" to Char(0x200C).toString(), "zwj" to Char(0x200D).toString(), "plusmn" to "±",
-        "frac12" to "½", "frac14" to "¼", "frac34" to "¾", "larr" to "←", "rarr" to "→", "uarr" to "↑", "darr" to "↓",
-        "eacute" to "é", "egrave" to "è", "aacute" to "á", "agrave" to "à", "ouml" to "ö", "uuml" to "ü", "auml" to "ä",
-        "ntilde" to "ñ", "ccedil" to "ç", "szlig" to "ß",
-    )
-
-    fun decodeEntities(s: String): String {
-        if (!s.contains('&')) return s
-        return Regex("&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z][a-zA-Z0-9]{1,15});").replace(s) { m ->
-            val r = m.groupValues[1]
-            when {
-                r.startsWith("#x") || r.startsWith("#X") -> cp(r.substring(2).toIntOrNull(16)) ?: m.value
-                r.startsWith("#") -> cp(r.substring(1).toIntOrNull()) ?: m.value
-                else -> named[r] ?: named[r.lowercase()] ?: m.value
-            }
-        }
-    }
-
-    private fun cp(v: Int?): String? =
-        if (v == null || v <= 0 || v > 0x10FFFF || v in 0xD800..0xDFFF) null else String(Character.toChars(v))
+    /** Character references, decoded by the web skill's full HTML decoder so both read pages the same way. */
+    fun decodeEntities(s: String): String = Entities.decode(s)
 }

@@ -134,6 +134,9 @@ class DocumentsTest {
         assertTrue(r.blocks.any { it.text.contains("chart") })
         assertTrue(r.blocks.any { it.text == "  a\n  b" })
         assertTrue(r.blocks.any { it.text == "after attr" })
+        // The same decoder as the web skill: entities without a semicolon, windows-1252 numeric
+        // references and the full HTML entity list.
+        assertEquals("Fish & chips – 5 km ♥", HtmlText.parse("<p>Fish &amp chips &#150; 5&nbsp;km &hearts;</p>").blocks.single().text)
     }
 
     @Test
