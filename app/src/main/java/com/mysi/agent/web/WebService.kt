@@ -22,10 +22,12 @@ class WebService(
 ) {
     companion object {
         /**
-         * Most characters any tool result may have. The runtime cuts results at 3500, so everything
-         * (header, text, "next part" hints) is sized to fit under that.
+         * Most characters any web tool result may have, header, text and "next part" hints
+         * included. The runtime shows the model at most ResultStore.EXCERPT_CHARS of a result and
+         * adds its own read_result handle past that, so web results stay within this and page
+         * themselves with offset instead.
          */
-        const val OUTPUT_BUDGET = 3300
+        const val OUTPUT_BUDGET = com.mysi.agent.ResultStore.PAGED_TOOL_CHARS
 
         /** How long to leave DuckDuckGo alone after it shows its bot check. */
         const val DUCKDUCKGO_PAUSE_MS = 5 * 60_000L

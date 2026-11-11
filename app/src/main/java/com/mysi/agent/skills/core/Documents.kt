@@ -8,8 +8,8 @@ import java.io.IOException
 
 /** Opens, describes, pages through and searches documents of every supported type. */
 object Documents {
-    /** Characters returned per read_document call, safely under the runtime's result cap. */
-    const val PAGE_CHARS = 2_800
+    /** Text characters per read_document call; with its header and "next" line it stays within [Budget.MAX]. */
+    const val PAGE_CHARS = Budget.MAX - 500
 
     private val byExtension = mapOf(
         "pdf" to DocType.PDF,

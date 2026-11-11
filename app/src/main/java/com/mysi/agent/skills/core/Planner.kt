@@ -214,11 +214,12 @@ class Planner(private val store: PlannerStore, private val zone: () -> ZoneId = 
             Bm25Ranker(index).rank(query, count).filter { it.score > 0 }.mapNotNull { byId[it.id] }
         }
         if (found.isEmpty()) return "No notes match '$query'."
-        val per = (2_800 / found.size).coerceAtLeast(200)
-        return found.joinToString("\n\n") { n ->
-            val date = LocalDateTime.ofInstant(Instant.ofEpochMilli(n.updated), zone()).toLocalDate()
-            val body = n.text.let { if (it.length > per) it.take(per - 1).trimEnd() + "…" else it }
-            "#${n.id} ${n.title} ($date)\n$body"
+        val heads = found.map { n -> "#${n.id} ${n.title} (${LocalDateTime.ofInstant(Instant.ofEpochMilli(n.updated), zone()).toLocalDate()})\n" }
+        // Every note's heading, and an equal share of what is left for each note's text.
+        val per = ((Budget.CHARS - heads.sumOf { it.length + 2 }) / found.size).coerceAtLeast(200)
+        return found.indices.joinToString("\n\n") { i ->
+            val body = found[i].text.let { if (it.length > per) it.take(per - 1).trimEnd() + "…" else it }
+            heads[i] + body
         }
     }
 

@@ -68,11 +68,16 @@ data class ReadLimits(
 )
 
 /**
- * Tool results must fit the runtime's cap of about 3,500 characters, which cuts silently. Lists
- * therefore stop at whole lines within [CHARS] and say how to get the rest.
+ * Tool results page themselves and must never be cut by the runtime, which shows the model at
+ * most ResultStore.EXCERPT_CHARS of a result and puts its own read_result handle on the rest.
+ * Lists therefore stop at whole lines within [CHARS] and say how to get the rest.
  */
 object Budget {
-    const val CHARS = 3_000
+    /** Room for a list's lines; the caller's header and "next page" line fit in the margin up to [MAX]. */
+    const val CHARS = com.mysi.agent.ResultStore.PAGED_TOOL_CHARS - 300
+
+    /** The most any skill-pack result may have. */
+    const val MAX = com.mysi.agent.ResultStore.PAGED_TOOL_CHARS
 
     /** How many of [lines] fit in [max] characters joined by new lines; at least one when any exist. */
     fun fit(lines: List<String>, max: Int = CHARS): Int {

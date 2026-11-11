@@ -231,7 +231,7 @@ object WebSkill {
         val saved = withContext(Dispatchers.IO) { save(ctx, report) }
         val where = saved?.let { "Full report with quotes and all sources saved to $it (read it with the document tools)." }
             ?: "The report could not be saved to a file."
-        return where + "\n" + report.brief(3000)
+        return where + "\n" + report.brief(WebService.OUTPUT_BUDGET - where.length - 1)
     }
 
     /** Saves the Markdown report as Research/<date>-<question>.md in the workspace; returns its relative path. */

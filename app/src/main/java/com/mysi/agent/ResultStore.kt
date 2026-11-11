@@ -58,8 +58,25 @@ class ResultStore(
     companion object {
         /** Results up to this long are given whole and never stored. */
         const val STUB_CHARS = 300
-        /** The most of a result the model sees in the turn the tool ran. */
-        const val EXCERPT_CHARS = 2_000
+
+        /**
+         * The most of a result the model sees in the turn the tool ran.
+         *
+         * One read-more mechanism per result: tools that page their own output (documents,
+         * knowledge base, data, memory, planner, web) keep every result within [PAGED_TOOL_CHARS],
+         * so they are never cut here and their own "page=" or "offset=" hint is the only one the
+         * model sees. read_result is for the tools that do not page (list_apps, read_text_file…).
+         *
+         * Window check: 3,500 characters are about 875 tokens of English, or 1,750 of Hindi or
+         * Tamil at Tokens' two characters per token. Three such results in one step, plus about
+         * 5,000 tokens of system prompt and tool schemas and the 1,536-token output reserve, stay
+         * under the 16,384-token window; past that, the conversation is rebuilt with the older
+         * results as stubs (see ContextManager.fitOpen).
+         */
+        const val EXCERPT_CHARS = 3_500
+
+        /** The budget for a self-paging tool's whole result, hints included; a margin under [EXCERPT_CHARS]. */
+        const val PAGED_TOOL_CHARS = EXCERPT_CHARS - 200
         const val PAGE_CHARS = 2_500
 
         fun handle(id: Int, more: Int, offset: Int) = "[result id=$id, $more more chars; call read_result(id=$id, offset=$offset)]"

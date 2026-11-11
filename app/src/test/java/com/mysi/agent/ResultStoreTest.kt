@@ -21,7 +21,7 @@ class ResultStoreTest {
         val store = ResultStore()
         val out = store.present("read_web_page", text)
         assertTrue(out.text.startsWith(text.take(ResultStore.EXCERPT_CHARS)))
-        assertTrue(out.text.endsWith("[result id=1, 4000 more chars; call read_result(id=1, offset=2000)]"))
+        assertTrue(out.text.endsWith("[result id=1, 2500 more chars; call read_result(id=1, offset=3500)]"))
         assertTrue(out.stub.endsWith("[result id=1, 5700 more chars; call read_result(id=1, offset=300)]"))
         assertEquals(text, store.get(1))
     }

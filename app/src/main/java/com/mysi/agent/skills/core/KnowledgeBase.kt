@@ -101,14 +101,29 @@ class KnowledgeBase(private val store: KbStore, private val clock: () -> Long = 
         const val MAX_CHUNKS_PER_DOC = 20_000
         const val MAX_TOTAL_CHUNKS = 200_000
 
-        fun format(passages: List<Passage>, maxChars: Int = 3_000): String {
+        /** Each passage shown gets at least this much text; fewer passages are shown rather than less. */
+        private const val MIN_PASSAGE = 300
+
+        /**
+         * kb_search's answer: numbered passages with their source, all within [maxChars]. When
+         * not every passage fits with [MIN_PASSAGE] characters of text, the weakest are left out
+         * and the answer says so.
+         */
+        fun format(passages: List<Passage>, maxChars: Int = Budget.CHARS): String {
             if (passages.isEmpty()) return "No passages match. Try other words, or check kb_list for what is indexed."
-            val per = (maxChars / passages.size).coerceAtLeast(300)
-            return passages.mapIndexed { i, p ->
-                val text = p.text.replace(Regex("\\s+"), " ").let { if (it.length > per) it.take(per - 1).trimEnd() + "…" else it }
-                "[${i + 1}] ${p.document}, ${p.location}:\n$text"
-            }.joinToString("\n\n")
+            val heads = passages.mapIndexed { i, p -> "[${i + 1}] ${p.document.take(120)}, ${p.location.take(60)}:\n" }
+            fun overhead(n: Int) = heads.take(n).sumOf { it.length + 2 } + NOTE_ROOM
+            var n = passages.size
+            while (n > 1 && overhead(n) + n * MIN_PASSAGE > maxChars) n--
+            val per = ((maxChars - overhead(n)) / n).coerceAtLeast(MIN_PASSAGE)
+            val body = (0 until n).joinToString("\n\n") { i ->
+                val text = passages[i].text.replace(Regex("\\s+"), " ").let { if (it.length > per) it.take(per - 1).trimEnd() + "…" else it }
+                heads[i] + text
+            }
+            return if (n < passages.size) "$body\n\n(${passages.size - n} weaker passages left out; search with more specific words to see others.)" else body
         }
+
+        private const val NOTE_ROOM = 90
     }
 }
 

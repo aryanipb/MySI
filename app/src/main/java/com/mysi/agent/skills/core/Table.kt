@@ -211,11 +211,15 @@ object TableQuery {
     const val MAX_LIMIT = 200
 
     /** Compact text for the model; stops before [maxChars]. */
-    fun format(r: Result, grouped: Boolean, maxChars: Int = 2_800): String {
+    fun format(r: Result, grouped: Boolean, maxChars: Int = Budget.MAX - 500): String {
         val sb = StringBuilder()
         if (grouped) sb.append("${r.matched} result row${if (r.matched == 1) "" else "s"}")
         else sb.append("${r.matched} of ${r.total} rows match")
-        val body = StringBuilder(r.header.joinToString(" | ")).append('\n')
+        // A very wide table's header alone could fill the budget; keep it to a third and say how to narrow it.
+        val fullHeader = r.header.joinToString(" | ")
+        val header = if (fullHeader.length <= maxChars / 3) fullHeader
+        else fullHeader.take(maxChars / 3).substringBeforeLast(" | ") + " | … (${r.header.size} columns; use select to show fewer)"
+        val body = StringBuilder(header).append('\n')
         var shown = 0
         for (row in r.rows) {
             val line = row.joinToString(" | ") { it.replace('\n', ' ').take(120) } + "\n"
@@ -603,7 +607,7 @@ object Stats {
      * Columns with types and ranges, plus sample rows, for table_info. A very wide table lists as
      * many columns as fit and says how many more there are.
      */
-    fun info(table: Table, maxChars: Int = 2_800): String {
+    fun info(table: Table, maxChars: Int = Budget.MAX - 500): String {
         val sb = StringBuilder()
         sb.append("Table '${table.name.take(120)}': ${table.rows.size} data rows, ${table.columns.size} columns")
         if (table.sheets.size > 1) sb.append(" (sheets: ${table.sheets.joinToString(", ").take(400)})")
