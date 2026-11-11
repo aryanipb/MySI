@@ -77,6 +77,14 @@ class RouterTest {
         case("post this photo on instagram with a caption", listOf("social"), "post_to_social"),
         case("book an uber to the airport", listOf("shopping_travel"), "ride_to"),
         case("directions to the nearest petrol pump", listOf("shopping_travel"), "maps"),
+        // v0.8's routing cases, now competing with the new skills
+        case("send a message to Rahul on WhatsApp", listOf("communication"), "whatsapp_message"),
+        case("where am I right now? share my location", listOf("device", "communication"), "get_location"),
+        case("start a 10 minute timer", listOf("alarms_media"), "set_timer"),
+        case("search the internet for today's cricket score", listOf("web"), "search_internet"),
+        case("play some lofi videos on youtube", listOf("social"), "youtube_search"),
+        case("order a phone charger on amazon", listOf("shopping_travel"), "amazon_search"),
+        case("how much memory is free on my phone", listOf("device", "memory"), "device_status"),
     )
 
     @Test

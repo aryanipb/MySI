@@ -62,10 +62,12 @@ class ResultStore(
         /**
          * The most of a result the model sees in the turn the tool ran.
          *
-         * One read-more mechanism per result: tools that page their own output (documents,
-         * knowledge base, data, memory, planner, web) keep every result within [PAGED_TOOL_CHARS],
-         * so they are never cut here and their own "page=" or "offset=" hint is the only one the
-         * model sees. read_result is for the tools that do not page (list_apps, read_text_file…).
+         * Tools that page their own output (documents, knowledge base, data, memory, planner,
+         * web) keep every result within [PAGED_TOOL_CHARS], so the turn they run in shows the
+         * whole result with only their own "page=" or "offset=" hint for continuing. Tools that do
+         * not page (list_apps, read_text_file…) are cut here, with a read_result handle. Separately,
+         * any result over [STUB_CHARS] is replayed as a stub in later steps and turns (see
+         * ContextManager); read_result shows that earlier result again.
          *
          * Window check: 3,500 characters are about 875 tokens of English, or 1,750 of Hindi or
          * Tamil at Tokens' two characters per token. Three such results in one step, plus about
