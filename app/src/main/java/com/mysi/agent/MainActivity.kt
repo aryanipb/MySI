@@ -28,6 +28,7 @@ import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.TextView
 import androidx.core.content.FileProvider
+import com.mysi.agent.models.ModelSetupActivity
 import com.mysi.agent.senses.LiveVisionActivity
 import com.mysi.agent.senses.Media
 import com.mysi.agent.senses.Recorder
@@ -53,6 +54,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 class MainActivity : UiActivity(), Host {
     private lateinit var status: TextView
+    private lateinit var modelButton: TextView
     private lateinit var log: LinearLayout
     private lateinit var input: EditText
     private lateinit var sendButton: TextView
@@ -85,14 +87,13 @@ class MainActivity : UiActivity(), Host {
         shell("MySI")
         status = text(body, "", 13f, muted)
         val actions = row(body)
-        listOf<Pair<String, () -> Unit>>(
-                "Load model" to ::pickModel,
-                "New chat" to { Agent.newChat() },
-            )
-            .forEachIndexed { i, (label, act) ->
-                button(actions, label, i == 0, act).layoutParams =
-                    LinearLayout.LayoutParams(0, -2, 1f).apply { if (i > 0) marginStart = dp(8) }
-            }
+        // The primary action opens model setup ("Get a model", "Change model" or "Show download");
+        // its "Use a file I already have" leads to the file picker.
+        modelButton = button(actions, ModelButton.GET, true, ::openSetup).apply {
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+        }
+        button(actions, "New chat", false) { Agent.newChat() }.layoutParams =
+            LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(8) }
         val screens = row(body)
         listOf<Pair<String, () -> Unit>>(
                 "Skills" to { startActivity(Intent(this, SkillsActivity::class.java)) },
@@ -126,8 +127,22 @@ class MainActivity : UiActivity(), Host {
         if (!Agent.ready) {
             val saved = Agent.savedModel
             if (saved != null && File(saved).canRead()) Agent.scope.launch { Agent.load(saved) }
-            else status.text = "No model loaded. Download a Gemma 4 .litertlm model (huggingface.co/litert-community), then tap Load model."
-        } else status.text = "Ready · ${Agent.backend} · ${Agent.toolCount} tools"
+            else status.text = if (ModelSetupActivity.hasPendingSetup(this)) ModelButton.DOWNLOADING else ModelButton.NO_MODEL
+        } else status.text = readyText()
+        syncModelButton()
+    }
+
+    private fun readyText() = "Ready · ${Agent.backend} · ${Agent.toolCount} tools"
+
+    private fun syncModelButton() {
+        val label = ModelButton.label(Agent.ready, ModelSetupActivity.hasPendingSetup(this))
+        modelButton.text = label
+        modelButton.contentDescription = label
+    }
+
+    private fun openSetup() {
+        setupShown = true
+        startActivityForResult(ModelSetupActivity.intent(this), REQ_SETUP)
     }
 
     override var inFront = false
@@ -144,6 +159,9 @@ class MainActivity : UiActivity(), Host {
         inFront = true
         // The sense buttons and Send/Stop follow whatever happened while another screen was in front.
         syncBusy()
+        syncModelButton()
+        // An interrupted download needs the setup screen to finish; open it once, then only offer it.
+        if (ModelButton.openSetupOnItsOwn(ModelSetupActivity.hasPendingSetup(this), setupShown)) openSetup()
     }
 
     override fun onDestroy() {
@@ -637,6 +655,8 @@ class MainActivity : UiActivity(), Host {
             }
         }
         if (e is Event.Reply || e is Event.Error || e is Event.Status) resolveWorking()
+        // A model can finish loading while this screen is open (a download started in setup).
+        if (e is Event.Error || e is Event.Status) syncModelButton()
         syncBusy()
         scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
     }
@@ -785,8 +805,22 @@ class MainActivity : UiActivity(), Host {
         super.onActivityResult(requestCode, resultCode, data)
         when (requestCode) {
             REQ_MODEL -> data?.data?.takeIf { resultCode == RESULT_OK }?.let(::importModel)
+            REQ_SETUP -> setupClosed(resultCode, data)
             else -> results.remove(requestCode)?.complete(resultCode to data)
         }
+    }
+
+    /** The model setup screen closed (see its result contract in ModelSetupActivity). */
+    private fun setupClosed(resultCode: Int, data: Intent?) {
+        setupShown = true
+        val pending = data?.getBooleanExtra(ModelSetupActivity.EXTRA_SETUP_PENDING, false) == true
+        when (ModelButton.afterSetup(resultCode, pending)) {
+            ModelButton.After.Loaded -> status.text = readyText()
+            ModelButton.After.PickOwnFile -> pickModel()
+            ModelButton.After.DownloadContinues -> status.text = ModelButton.DOWNLOADING
+            ModelButton.After.Nothing -> Unit
+        }
+        syncModelButton()
     }
 
     // ---------------- model ----------------
@@ -822,6 +856,7 @@ class MainActivity : UiActivity(), Host {
         val dir = File(models, System.currentTimeMillis().toString())
         val dest = File(dir.apply { mkdirs() }, name)
         status.text = "Copying $name into the app…"
+        val app = applicationContext
         Agent.scope.launch {
             val ok =
                 withContext(Dispatchers.IO) {
@@ -835,9 +870,15 @@ class MainActivity : UiActivity(), Host {
                 status.text = "Copy failed. Check free space and try again."
                 return@launch
             }
-            if (Agent.load(dest.absolutePath))
-                withContext(Dispatchers.IO) { models.listFiles()?.filter { it != dir }?.forEach { it.deleteRecursively() } }
-            else withContext(Dispatchers.IO) { dir.deleteRecursively() }
+            val loaded = Agent.load(dest.absolutePath)
+            withContext(Dispatchers.IO) {
+                if (loaded) {
+                    models.listFiles()?.filter { it != dir }?.forEach { it.deleteRecursively() }
+                    // Models downloaded by the setup screen are no longer used either.
+                    ModelSetupActivity.pruneUnusedModels(app)
+                } else dir.deleteRecursively()
+            }
+            syncModelButton()
         }
     }
 
@@ -852,6 +893,7 @@ class MainActivity : UiActivity(), Host {
         private const val REQ_NOTIFICATIONS = 6
         private const val REQ_ATTACH = 7
         private const val REQ_CAMERA = 8
+        private const val REQ_SETUP = 9
         private const val RESULT_TIMEOUT_MS = 10 * 60_000L
         private const val DIM = 0.4f
 
@@ -864,6 +906,9 @@ class MainActivity : UiActivity(), Host {
 
         /** The attachments waiting to be sent; survives recreation (e.g. rotation). */
         private val draft = Draft()
+
+        /** The setup screen was opened or returned in this process, so it is only offered from now on. */
+        private var setupShown = false
 
         /** The chat screen on show, for pickers that finish after a rotation. */
         @Volatile private var shown: WeakReference<MainActivity>? = null
