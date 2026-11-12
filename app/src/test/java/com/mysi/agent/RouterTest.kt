@@ -143,6 +143,14 @@ class RouterTest {
     }
 
     @Test
+    fun attachedFileNamesRouteToTheSkillThatOpensThem() {
+        fun doc(name: String) = listOf(Attachment.Document(java.io.File("/cache/picked/1/$name")))
+        assertTrue("documents" in router.select(Attachments.routingText("what does this say", doc("report.pdf"))))
+        assertTrue("documents" in router.select(Attachments.routingText("summarise this", doc("report.pdf"))))
+        assertTrue("data_analyst" in router.select(Attachments.routingText("total by region", doc("sales.csv"))))
+    }
+
+    @Test
     fun noMatchReturnsNothing() {
         assertEquals(emptyList<String>(), router.select("yes, do it"))
         assertEquals(emptyList<String>(), router.select("thanks!"))

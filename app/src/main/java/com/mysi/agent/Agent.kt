@@ -356,11 +356,11 @@ object Agent {
     }
 
     /**
-     * Runs [text] as a new request in [scope], with [attachments]: pictures and recordings inside
-     * the [Storage] sandbox (the workspace or picked files). The model sees or hears them directly
-     * when it can (at most [Attachments.MAX_IMAGES] images and one audio clip of up to
-     * [Attachments.AUDIO_CLIP_SECONDS]); every attachment is also named by path in the request so
-     * the vision and hearing tools can use it. [stop] cancels the request.
+     * Runs [text] as a new request in [scope], with [attachments]: pictures, recordings and other
+     * files inside the [Storage] sandbox (the workspace or picked files). The model sees or hears
+     * pictures and recordings directly when it can (at most [Attachments.MAX_IMAGES] images and one
+     * audio clip of up to [Attachments.AUDIO_CLIP_SECONDS]); every attachment is also named by path
+     * in the request so the vision, hearing, document and file tools can use it. [stop] cancels the request.
      */
     fun submit(text: String, attachments: List<Attachment> = emptyList()): Job = scope.launch { ask(text, attachments) }.also { request = it }
 
@@ -381,11 +381,11 @@ object Agent {
                         return@withEngine
                     }
                     val given = checkAttachments(attachments) ?: run {
-                        final = Event.Error("MySI can only use pictures and recordings the user picked, took or recorded in MySI.")
+                        final = Event.Error("MySI can only use pictures, recordings and files the user picked, took or recorded in MySI.")
                         return@withEngine
                     }
                     emit(Event.User(text, given))
-                    // A photo or a recording is personal data, like a file the user picked.
+                    // A photo, a recording or an attached file is personal data, like a file the user picked.
                     if (given.isNotEmpty()) touchedPrivate = true
                     val sent = Attachments.sendable(given, canSee, canHear)
                     val request = text + Attachments.note(given, sent, canSee, canHear)
@@ -398,7 +398,7 @@ object Agent {
                             "hearing".takeIf { given.any { it is Attachment.Audio } },
                         ).filter { Skills.usable(it) != null }
                         val previous = active.filter { Skills.usable(it) != null }
-                        val routed = router().select(text, MAX_ROUTED)
+                        val routed = router().select(Attachments.routingText(text, given), MAX_ROUTED)
                         active = Router.merge(Router.merge(senses, routed, MAX_ROUTED), previous, MAX_ROUTED)
                         val r = AgentLoop(maxSteps).run(chat, transcript, request, { partial = it; emit(Event.Partial(it)) }, sent, ::runTool)
                         final = Event.Reply(r.answer, text)
@@ -433,6 +433,7 @@ object Agent {
             when (a) {
                 is Attachment.Image -> Attachment.Image(f)
                 is Attachment.Audio -> Attachment.Audio(f, a.seconds ?: Media.audioSeconds(f))
+                is Attachment.Document -> Attachment.Document(f)
             }
         }
 
@@ -532,6 +533,8 @@ object Agent {
         when (a) {
             is Attachment.Image -> Content.ImageBytes(Media.modelJpeg(a.file))
             is Attachment.Audio -> Content.AudioBytes(Media.modelWav(a.file, Attachments.AUDIO_CLIP_SECONDS))
+            // Never sendable (see Attachments.sendable): the request names its path instead.
+            is Attachment.Document -> throw IllegalStateException("A file is passed by its path, not as media.")
         }
 
     /**
