@@ -140,11 +140,15 @@ interface MemoryStore {
     fun update(id: Long, text: String, topic: String, now: Long): Boolean
 
     fun delete(id: Long): Boolean
+
+    /** Deletes every memory; returns how many there were. */
+    fun clear(): Int
 }
 
 /**
  * Durable facts the user approved. The model may only save through a confirmed tool call; the
- * future Memory screen calls [list], [update] and [delete] directly.
+ * Memory screen calls [remember], [list], [update], [delete] and [clear] directly, since there the
+ * user is the one typing.
  */
 class MemoryBook(private val store: MemoryStore, private val clock: () -> Long = System::currentTimeMillis) {
     data class Saved(val id: Long, val duplicate: Boolean)
@@ -175,8 +179,11 @@ class MemoryBook(private val store: MemoryStore, private val clock: () -> Long =
 
     /** Newest change first; ties by number, so paging by offset is stable. */
     fun list(offset: Int = 0, limit: Int = 50): List<MemoryItem> =
+        listAll().drop(offset.coerceAtLeast(0)).take(limit.coerceIn(1, 200))
+
+    /** Every memory in [list]'s order (at most [MAX_COUNT] can exist), for the Memory screen. */
+    fun listAll(): List<MemoryItem> =
         store.all().sortedWith(compareByDescending<MemoryItem> { it.updated }.thenByDescending { it.id })
-            .drop(offset.coerceAtLeast(0)).take(limit.coerceIn(1, 200))
 
     /** One page for list_memories, within the result budget, with the offset of the next page. */
     fun page(offset: Int): String {
@@ -206,10 +213,15 @@ class MemoryBook(private val store: MemoryStore, private val clock: () -> Long =
     fun update(id: Long, text: String, topic: String): Boolean {
         val t = clean(text)
         require(t.isNotEmpty() && t.length <= MAX_CHARS) { "A memory must be 1 to $MAX_CHARS characters." }
+        // Two memories with the same fact would make recall and forget ambiguous.
+        require(store.all().none { it.id != id && it.text.equals(t, true) }) { "MySI already remembers that." }
         return store.update(id, t, cleanTopic(topic), clock())
     }
 
     fun delete(id: Long): Boolean = store.delete(id)
+
+    /** Forgets everything; returns how many memories there were. */
+    fun clear(): Int = store.clear()
 
     companion object {
         const val MAX_CHARS = 500

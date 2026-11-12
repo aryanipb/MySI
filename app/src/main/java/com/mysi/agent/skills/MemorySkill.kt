@@ -25,14 +25,26 @@ object MemorySkill {
 
     private fun book(ctx: Context) = MemoryBook(SqlMemoryStore(SkillDb.get(ctx)))
 
-    /** All memories, newest first, for a Memory screen. */
+    /** One page of memories, newest first, for a Memory screen. */
     fun memories(ctx: Context, offset: Int = 0, limit: Int = 200): List<MemoryItem> = book(ctx).list(offset, limit)
 
-    /** Edits a memory from a Memory screen; false when it no longer exists. */
+    /** Every memory, newest first, for the Memory screen. */
+    fun allMemories(ctx: Context): List<MemoryItem> = book(ctx).listAll()
+
+    /**
+     * Saves a memory the user typed on the Memory screen (no approval: the user is the one adding
+     * it). Throws IllegalArgumentException with a plain message when it is empty, too long or memory is full.
+     */
+    fun addMemory(ctx: Context, text: String, topic: String): MemoryBook.Saved = book(ctx).remember(text, topic)
+
+    /** Edits a memory from a Memory screen; false when it no longer exists. Throws IllegalArgumentException like [addMemory]. */
     fun updateMemory(ctx: Context, id: Long, text: String, topic: String): Boolean = book(ctx).update(id, text, topic)
 
     /** Deletes a memory from a Memory screen; false when it no longer exists. */
     fun deleteMemory(ctx: Context, id: Long): Boolean = book(ctx).delete(id)
+
+    /** Deletes every memory; returns how many there were. */
+    fun deleteAllMemories(ctx: Context): Int = book(ctx).clear()
 
     private fun tools(ctx: Context): List<ToolDef> = listOf(
         ToolDef(

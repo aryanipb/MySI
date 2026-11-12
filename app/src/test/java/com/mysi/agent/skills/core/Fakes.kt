@@ -57,6 +57,8 @@ class FakeMemoryStore : MemoryStore {
     }
 
     override fun delete(id: Long) = items.remove(id) != null
+
+    override fun clear(): Int = items.size.also { items.clear() }
 }
 
 class FakePlannerStore : PlannerStore {
