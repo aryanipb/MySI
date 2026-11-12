@@ -15,10 +15,18 @@ import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
+import com.google.ai.edge.litertlm.Modality
+import com.google.ai.edge.litertlm.ModelInfo
 import com.google.ai.edge.litertlm.OpenApiTool
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.ToolCall
 import com.google.ai.edge.litertlm.tool
+import com.mysi.agent.senses.Accel
+import com.mysi.agent.senses.EnginePlan
+import com.mysi.agent.senses.LoadPlanner
+import com.mysi.agent.senses.Media
+import com.mysi.agent.senses.ModalityProbe
+import com.mysi.agent.senses.Modalities
 import com.mysi.agent.web.Llm
 import com.mysi.agent.web.WebSkill
 import java.lang.ref.WeakReference
@@ -45,7 +53,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 sealed class Event {
     data class Status(val text: String) : Event()
-    data class User(val text: String) : Event()
+
+    /** A request as the user sent it, with the pictures and recordings attached to it. */
+    data class User(val text: String, val attachments: List<Attachment> = emptyList()) : Event()
     data class ToolCall(val name: String, val args: String) : Event()
     data class ToolResult(val text: String) : Event()
 
@@ -115,8 +125,21 @@ object Agent {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     val history = mutableListOf<Event>()
     var listener: ((Event) -> Unit)? = null
+
+    /** How the loaded engine runs, for the status line, e.g. "GPU · vision GPU · audio CPU" or "CPU · text only". */
     var backend = ""
         private set
+
+    /** The loaded model takes pictures (its vision encoder started). False when no model is loaded. */
+    @Volatile var canSee = false
+        private set
+
+    /** The loaded model takes audio (its audio encoder started). False when no model is loaded. */
+    @Volatile var canHear = false
+        private set
+
+    /** Reads which senses a model file has before it is loaded. */
+    private val probe: ModalityProbe = LiteRtProbe
 
     val ready get() = engine != null
     // A job cancelled before it started never clears [request], so check it is still running.
@@ -155,7 +178,11 @@ object Agent {
     /** Takes [lock], or passes through when this coroutine already holds it (a tool's run inside a request). */
     private suspend fun <T> withEngine(block: suspend () -> T): T = lock.withEngine(block)
 
-    /** Loads the model, preferring the GPU and falling back to the CPU. Returns true when ready. */
+    /**
+     * Loads the model, preferring the GPU and falling back to the CPU, with the vision and audio
+     * encoders when the model has them (see [LoadPlanner]). A model whose encoders cannot start
+     * still loads as text-only. Returns true when ready.
+     */
     suspend fun load(path: String): Boolean =
         withContext(Dispatchers.IO) {
             withEngine {
@@ -163,41 +190,79 @@ object Agent {
                     closeConversation()
                     engine?.close()
                     engine = null
+                    canSee = false
+                    canHear = false
                 }
                 resetChat()
-                for (b in listOf<Backend>(Backend.GPU(), Backend.CPU())) {
-                    emit(Event.Status("Loading model on ${b.name}…"))
-                    try {
-                        // FP16 GPU activations garble Gemma 4 output past ~2k tokens of context
-                        // (LiteRT-LM issues #4001, #3879, #3913); FLOAT32 keeps it exact. The cache
-                        // dir is separate so no kernels compiled for FP16 are reused.
-                        val gpu = b is Backend.GPU
-                        val e = Engine(
-                            EngineConfig(
-                                modelPath = path,
-                                backend = b,
-                                maxNumTokens = WINDOW_TOKENS,
-                                cacheDir = java.io.File(app.cacheDir, if (gpu) "litertlm-gpu-f32" else "litertlm-cpu").apply { mkdirs() }.path,
-                                activationDataType = if (gpu) ActivationDataType.FLOAT32 else null,
-                            )
-                        )
-                        e.initialize()
-                        engine = e
-                        backend = b.name
-                        break
-                    } catch (t: Throwable) {
-                        emit(Event.Status("${b.name} failed: ${t.message?.take(160)}"))
-                    }
-                }
-                if (engine == null) {
+                emit(Event.Status("Checking the model…"))
+                val supported = runCatching { probe.probe(path) }.getOrNull()
+                val started = LoadPlanner.firstWorking(
+                    LoadPlanner.plans(supported),
+                    start = { p ->
+                        emit(Event.Status("Loading model: ${p.describe()}…"))
+                        startEngine(path, p)
+                    },
+                    failed = { p, t -> emit(Event.Status("${p.describe()} failed: ${t.message?.take(160)}")) },
+                )
+                if (started == null) {
                     emit(Event.Error("Could not load the model. Check the file is a .litertlm model."))
                     return@withEngine false
                 }
+                val (plan, e) = started
+                engine = e
+                backend = plan.describe()
+                canSee = plan.canSee
+                canHear = plan.canHear
                 prefs().edit().putString("model", path).apply()
                 emit(Event.Status("Ready · ${java.io.File(path).name} · $backend · $toolCount tools"))
                 true
             }
         }
+
+    /** Builds and initialises an engine for [p]; closes it and rethrows if initialising fails. */
+    private fun startEngine(path: String, p: EnginePlan): Engine {
+        // FP16 GPU activations garble Gemma 4 output past ~2k tokens of context (LiteRT-LM issues
+        // #4001, #3879, #3913); FLOAT32 keeps it exact. The cache dir is separate so no kernels
+        // compiled for FP16 are reused.
+        val gpu = p.text == Accel.GPU
+        val e = Engine(
+            EngineConfig(
+                modelPath = path,
+                backend = backendOf(p.text),
+                visionBackend = p.vision?.let(::backendOf),
+                audioBackend = p.audio?.let(::backendOf),
+                maxNumTokens = WINDOW_TOKENS,
+                maxNumImages = if (p.vision != null) Attachments.MAX_IMAGES else null,
+                cacheDir = java.io.File(app.cacheDir, if (gpu) "litertlm-gpu-f32" else "litertlm-cpu").apply { mkdirs() }.path,
+                activationDataType = if (gpu) ActivationDataType.FLOAT32 else null,
+            )
+        )
+        try {
+            e.initialize()
+        } catch (t: Throwable) {
+            runCatching { e.close() }
+            throw t
+        }
+        return e
+    }
+
+    private fun backendOf(a: Accel): Backend = if (a == Accel.GPU) Backend.GPU() else Backend.CPU()
+
+    /**
+     * Asks LiteRT-LM which input modalities a model file declares, and on which backends its
+     * encoders run. Any failure means "unknown", and the load then tries every option.
+     */
+    private object LiteRtProbe : ModalityProbe {
+        override fun probe(modelPath: String): Modalities? =
+            ModelInfo.from(modelPath).use { info ->
+                val m = info.inputModalities()
+                fun accels(mod: Modality): Set<Accel> =
+                    runCatching { info.supportedBackends(mod) }.getOrDefault(emptyList())
+                        .mapNotNull { b -> Accel.entries.firstOrNull { it.name == b.name } }
+                        .toSet()
+                Modalities(m.vision, m.audio, if (m.vision) accels(Modality.VISION) else emptySet(), if (m.audio) accels(Modality.AUDIO) else emptySet())
+            }
+    }
 
     /** Waits for any running request, so a conversation is never closed while it is in use. */
     fun newChat() {
@@ -214,6 +279,7 @@ object Agent {
     /** Forgets the chat: its turns, stored tool results, loaded skills, private-data flag and cached web pages. */
     private fun resetChat() {
         touchedPrivate = false
+        Media.clearCache()
         transcript.clear()
         results.clear()
         active = emptyList()
@@ -265,6 +331,7 @@ object Agent {
                 Rules:
                 - When the user asks for something a tool can do, call the tool. Never claim an action happened unless a tool result says so.
                 - You cannot see, read or tap other apps' screens. Tools open apps with things filled in, and the user makes the final tap: Send, Call, Post, Book, Pay or Save. Tell the user exactly what is ready and what to tap.
+                - You can look at photos and listen to recordings that the user attaches or picks, or that MySI records when the user agrees. They are processed on the phone and never uploaded.
                 - Open at most one other app per request: once it is open, MySI is in the background and Android will not let it open more until the user comes back.
                 - Files: you can only use files the user picks with pick_files, photos from take_photo, and files MySI made (list_files shows them). Use the exact paths these tools return; never guess a path.
                 - Only the web tools reach the internet: they search and read public web pages in the background. Never put the user's personal details into a search or web address unless the user asks.
@@ -285,15 +352,21 @@ object Agent {
         }
     }
 
-    /** Runs [text] as a new request in [scope]. [stop] cancels it. */
-    fun submit(text: String): Job = scope.launch { ask(text) }.also { request = it }
+    /**
+     * Runs [text] as a new request in [scope], with [attachments]: pictures and recordings inside
+     * the [Storage] sandbox (the workspace or picked files). The model sees or hears them directly
+     * when it can (at most [Attachments.MAX_IMAGES] images and one audio clip of up to
+     * [Attachments.AUDIO_CLIP_SECONDS]); every attachment is also named by path in the request so
+     * the vision and hearing tools can use it. [stop] cancels the request.
+     */
+    fun submit(text: String, attachments: List<Attachment> = emptyList()): Job = scope.launch { ask(text, attachments) }.also { request = it }
 
     /** Cancels the running request: model generation, a waiting approval or permission prompt, and later steps. */
     fun stop() {
         request?.cancel()
     }
 
-    suspend fun ask(text: String, maxSteps: Int = MAX_STEPS) {
+    suspend fun ask(text: String, attachments: List<Attachment> = emptyList(), maxSteps: Int = MAX_STEPS) {
         val me = currentCoroutineContext().job
         request = me
         var final: Event = Event.Status("Stopped.")
@@ -304,12 +377,25 @@ object Agent {
                         final = Event.Error("Load a model first.")
                         return@withEngine
                     }
-                    emit(Event.User(text))
+                    val given = checkAttachments(attachments) ?: run {
+                        final = Event.Error("MySI can only use pictures and recordings the user picked, took or recorded in MySI.")
+                        return@withEngine
+                    }
+                    emit(Event.User(text, given))
+                    // A photo or a recording is personal data, like a file the user picked.
+                    if (given.isNotEmpty()) touchedPrivate = true
+                    val sent = Attachments.sendable(given, canSee, canHear)
+                    val request = text + Attachments.note(given, sent, canSee, canHear)
                     partial = ""
                     try {
                         // Inside the try: routing builds every skill pack's tools, which may throw.
-                        active = Router.merge(router().select(text, MAX_ROUTED), active, MAX_ROUTED)
-                        val r = AgentLoop(maxSteps).run(chat, transcript, text, { partial = it; emit(Event.Partial(it)) }, ::runTool)
+                        // Attached media loads the skill whose tools can use it.
+                        val senses = listOfNotNull(
+                            "vision".takeIf { given.any { it is Attachment.Image } },
+                            "hearing".takeIf { given.any { it is Attachment.Audio } },
+                        ).filter { Skills.named(it) != null }
+                        active = Router.merge(Router.merge(senses, router().select(text, MAX_ROUTED), MAX_ROUTED), active, MAX_ROUTED)
+                        val r = AgentLoop(maxSteps).run(chat, transcript, request, { partial = it; emit(Event.Partial(it)) }, sent, ::runTool)
                         final = Event.Reply(r.answer, text)
                     } catch (c: CancellationException) {
                         transcript.closeTurn("Stopped by the user.", partial.trim().let { if (it.isEmpty()) "" else "$it (stopped)" })
@@ -331,6 +417,19 @@ object Agent {
             emit(final)
         }
     }
+
+    /**
+     * [attachments] resolved inside the [Storage] sandbox, each file once, with audio lengths
+     * filled in; null when one is outside it or missing.
+     */
+    private fun checkAttachments(attachments: List<Attachment>): List<Attachment>? =
+        attachments.distinctBy { it.kind to it.file.absolutePath }.map { a ->
+            val f = Storage.resolve(app, a.file.absolutePath)?.takeIf { it.isFile } ?: return null
+            when (a) {
+                is Attachment.Image -> Attachment.Image(f)
+                is Attachment.Audio -> Attachment.Audio(f, a.seconds ?: Media.audioSeconds(f))
+            }
+        }
 
     /** The chat conversation as [AgentLoop] uses it. */
     private val chat =
@@ -411,7 +510,9 @@ object Agent {
 
     private fun toMessage(e: Entry): Message =
         when (e) {
-            is Entry.User -> Message.user(e.text)
+            is Entry.User ->
+                if (e.attachments.isEmpty()) Message.user(e.text)
+                else Message.user(Contents.of(e.attachments.map(::mediaContent) + Content.Text(e.text)))
             is Entry.Model ->
                 Message.model(
                     if (e.text.isEmpty()) Contents.of(emptyList<Content>()) else Contents.of(e.text),
@@ -419,6 +520,13 @@ object Agent {
                     emptyMap(),
                 )
             is Entry.Tool -> Message.tool(Contents.of(e.outs.map { Content.ToolResponse(it.name, it.text) }))
+        }
+
+    /** An attachment as the model takes it: an upright JPEG, or the first 30 seconds as 16 kHz mono WAV. */
+    private fun mediaContent(a: Attachment): Content =
+        when (a) {
+            is Attachment.Image -> Content.ImageBytes(Media.modelJpeg(a.file))
+            is Attachment.Audio -> Content.AudioBytes(Media.modelWav(a.file, Attachments.AUDIO_CLIP_SECONDS))
         }
 
     /**
@@ -472,12 +580,24 @@ object Agent {
      */
     private fun makeRoomForSubstep() = closeConversation()
 
-    /** Backs [complete]: a fresh, tool-less conversation, closed afterwards. */
-    internal suspend fun generate(system: String, prompt: String, maxOutputTokens: Int?): String =
+    /**
+     * Backs [complete]: a fresh, tool-less conversation, closed afterwards. [images] (JPEG) and
+     * [audio] (WAV) go into the one user message ahead of [prompt]; they need a model that can see
+     * or hear, or this throws [SenseUnavailable].
+     */
+    internal suspend fun generate(
+        system: String,
+        prompt: String,
+        maxOutputTokens: Int?,
+        images: List<ByteArray> = emptyList(),
+        audio: List<ByteArray> = emptyList(),
+    ): String =
         withContext(Dispatchers.IO) {
             withEngine {
                 gen.withLock {
                     val e = engine ?: throw IllegalStateException("Load a model first.")
+                    if (images.isNotEmpty() && !canSee) throw SenseUnavailable(NO_VISION)
+                    if (audio.isNotEmpty() && !canHear) throw SenseUnavailable(NO_HEARING)
                     makeRoomForSubstep()
                     e.createConversation(
                         ConversationConfig(
@@ -488,7 +608,10 @@ object Agent {
                         )
                     ).use { c ->
                         val out = StringBuilder()
-                        stream(c, Message.user(prompt)) { out.append(textOf(it)) }
+                        val msg =
+                            if (images.isEmpty() && audio.isEmpty()) Message.user(prompt)
+                            else Message.user(Contents.of(images.map { Content.ImageBytes(it) } + audio.map { Content.AudioBytes(it) } + Content.Text(prompt)))
+                        stream(c, msg) { out.append(textOf(it)) }
                         out.toString()
                     }
                 }

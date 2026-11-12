@@ -73,7 +73,17 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     packaging {
-        jniLibs { useLegacyPackaging = true }
+        jniLibs {
+            useLegacyPackaging = true
+            // LiteRT-LM ships only arm64-v8a and x86_64. MediaPipe also ships 32-bit libraries;
+            // leaving them out keeps the app bundle from being offered to 32-bit devices that
+            // could never load the model runtime.
+            excludes += listOf("lib/armeabi-v7a/**", "lib/x86/**")
+        }
+    }
+    // MediaPipe memory-maps its bundled .tflite models, which only works for uncompressed assets.
+    androidResources {
+        noCompress += "tflite"
     }
 }
 
@@ -93,6 +103,20 @@ dependencies {
         // and owner-password PDFs decrypt with the platform's own crypto (PdfSourceTest).
         exclude(group = "org.bouncycastle")
     }
+
+    // Senses (all on-device). MediaPipe Tasks (Apache-2.0): object detection and sound
+    // classification with bundled models. 0.10.35 rather than the newer 1.x line: 1.x pins
+    // litertlm-android 0.18.0 and adds a separate 15-19 MB audio JNI library (speech synthesis and
+    // transcription) that MySI does not use. MediaPipe's usage-statistics upload is switched off in
+    // AndroidManifest.xml.
+    implementation("com.google.mediapipe:tasks-vision:0.10.35")
+    implementation("com.google.mediapipe:tasks-audio:0.10.35")
+    // CameraX (Apache-2.0) for the live vision screen.
+    val cameraX = "1.6.2"
+    implementation("androidx.camera:camera-core:$cameraX")
+    implementation("androidx.camera:camera-camera2:$cameraX")
+    implementation("androidx.camera:camera-lifecycle:$cameraX")
+    implementation("androidx.camera:camera-view:$cameraX")
 
     testImplementation("junit:junit:4.13.2")
 }

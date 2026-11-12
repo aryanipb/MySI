@@ -1,6 +1,8 @@
 package com.mysi.agent
 
 import android.content.Context
+import com.mysi.agent.senses.HearingSkill
+import com.mysi.agent.senses.VisionSkill
 import com.mysi.agent.skills.DataSkill
 import com.mysi.agent.skills.DocumentsSkill
 import com.mysi.agent.skills.KnowledgeSkill
@@ -85,7 +87,9 @@ object Skills {
         Skill(
             name = "files",
             description = "Take photos with the camera, and read or write plain text files in MySI's workspace.",
-            keywords = listOf("photo", "picture", "pic", "image", "selfie", "camera", "snap", "click", "txt", "text file", "save", "write", "folder", "workspace"),
+            // "photo" alone is left to the vision skill ("what is in this photo"); taking one still
+            // routes here through take_photo and these words.
+            keywords = listOf("picture", "pic", "image", "selfie", "camera", "snap", "click", "txt", "text file", "save", "write", "folder", "workspace"),
             instructions = "Files: take_photo returns the photo's path for the sharing tools. write_text_file saves plain text; for Word, Excel, PDF or other documents use the documents skill.",
             tools = group("files"),
         )
@@ -142,7 +146,7 @@ object Skills {
     @Volatile var all: List<Skill> =
         listOf(
             communication, files, documents, KnowledgeSkill.skill, DataSkill.skill, WebSkill.skill, browser,
-            MemorySkill.skill, PlannerSkill.skill, device, alarmsMedia, social, shoppingTravel,
+            MemorySkill.skill, PlannerSkill.skill, VisionSkill.skill, HearingSkill.skill, device, alarmsMedia, social, shoppingTravel,
         )
 
     fun named(name: String): Skill? = if (name == core.name) core else all.firstOrNull { it.name.equals(name.trim(), true) }
