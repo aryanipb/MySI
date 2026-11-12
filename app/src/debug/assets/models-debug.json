@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "version": 1,
+  "updated": "2026-11-12",
+  "models": [
+    {
+      "id": "test-embeddinggemma-270m",
+      "name": "Small test file (debug builds only)",
+      "publisher": "Google",
+      "licence": "Apache-2.0",
+      "repo": "litert-community/embeddinggemma-2-text-270m-litert-lm",
+      "revision": "9be6e8b90982095dc05c2bd162e4b954ee4dbac7",
+      "file": "embeddinggemma-2-text-270m.litertlm",
+      "url": "https://huggingface.co/litert-community/embeddinggemma-2-text-270m-litert-lm/resolve/9be6e8b90982095dc05c2bd162e4b954ee4dbac7/embeddinggemma-2-text-270m.litertlm",
+      "sizeBytes": 164626432,
+      "sha256": "2d079ee2f6f066b1f368e8d7c819f55214eaef1d0513b312321901f30ab286fb",
+      "abilities": {
+        "text": true,
+        "images": false,
+        "audio": false,
+        "tools": false
+      },
+      "memoryMb": 600,
+      "memoryEstimated": true,
+      "memoryBasis": "Estimate. An embedding model, not a chat model: it is here only to test the download, the check and a clean failed load.",
+      "minRamGb": 2,
+      "comfortableRamGb": 4,
+      "ramBasis": "Estimate.",
+      "quality": 1,
+      "verified": false,
+      "notes": "Debug builds only. Downloads a small real file to test the download path; loading it as a chat model is expected to fail.",
+      "testOnly": true
+    },
+    {
+      "id": "test-wrong-fingerprint",
+      "name": "Test file, wrong fingerprint (debug only)",
+      "publisher": "Google",
+      "licence": "Apache-2.0",
+      "repo": "litert-community/embeddinggemma-2-text-270m-litert-lm",
+      "revision": "9be6e8b90982095dc05c2bd162e4b954ee4dbac7",
+      "file": "embeddinggemma-2-text-270m.litertlm",
+      "url": "https://huggingface.co/litert-community/embeddinggemma-2-text-270m-litert-lm/resolve/9be6e8b90982095dc05c2bd162e4b954ee4dbac7/embeddinggemma-2-text-270m.litertlm",
+      "sizeBytes": 164626432,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "abilities": {
+        "text": true,
+        "images": false,
+        "audio": false,
+        "tools": false
+      },
+      "memoryMb": 600,
+      "memoryEstimated": true,
+      "memoryBasis": "Estimate. The same small file with a deliberately wrong SHA-256, to test that a mismatch is caught and the file deleted.",
+      "minRamGb": 2,
+      "comfortableRamGb": 4,
+      "ramBasis": "Estimate.",
+      "quality": 1,
+      "verified": false,
+      "notes": "Debug builds only. Its fingerprint is deliberately wrong: the download must be rejected and deleted after checking.",
+      "testOnly": true
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!--
     Play Store build: no restricted or special-access permissions (no SMS, call log,
@@ -17,10 +18,17 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <!--
+    Senses, asked for in context: the camera for the live vision screen, the microphone when the
+    user agrees to a recording. Pictures and sound are processed on the phone and never uploaded.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <!-- Package visibility without QUERY_ALL_PACKAGES: launchable apps, and the TTS engine. -->
     <queries>
@@ -57,9 +65,46 @@
             </intent-filter>
         </activity>
 
+        <!-- The skills list with on/off switches, and what MySI remembers. Opened only by MySI. -->
+        <activity
+            android:name=".SkillsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".MemoryActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Live camera view with object detection; returns a saved frame. Opened only by MySI. -->
+        <activity
+            android:name=".senses.LiveVisionActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme" />
+
+        <!-- One-tap model setup: picks, downloads, checks and loads a model. Opened only by MySI. -->
+        <activity
+            android:name=".models.ModelSetupActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme" />
+
         <receiver
             android:name=".ApprovalReceiver"
             android:exported="false" />
+
+        <!--
+        MediaPipe Tasks reports usage statistics (task name, app id and version, latency) to Google
+        through the datatransport library's "cct" backend. MySI promises that its on-device
+        features send nothing, so the backend is unregistered here: with no backend, datatransport
+        drops each event before storing or scheduling it ("Transport backend 'cct' is not
+        registered"). SensesManifestTest keeps this in place.
+        -->
+        <service
+            android:name="com.google.android.datatransport.runtime.backends.TransportBackendDiscovery"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="backend:com.google.android.datatransport.cct.CctBackendFactory"
+                tools:node="remove" />
+        </service>
 
         <provider
             android:name="androidx.core.content.FileProvider"
