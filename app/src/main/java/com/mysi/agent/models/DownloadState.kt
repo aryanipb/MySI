@@ -64,8 +64,7 @@ object DownloadRules {
     fun resume(pending: PendingDownload?, dm: DmSnapshot, downloadExists: Boolean, finalExists: Boolean, loadedModel: String? = null): ResumeAction {
         pending ?: return ResumeAction.None
         if (finalExists && loadedModel == pending.finalPath) return ResumeAction.Finished
-        if (pending.loadStarted)
-            return ResumeAction.Discard("MySI closed while starting ${pending.modelName}, so the file was deleted to be safe. Try again, or choose another model.")
+        if (pending.loadStarted) return ResumeAction.Discard(closedWhileStarting(pending.modelName))
         if (pending.moved) return if (finalExists) ResumeAction.Verify else ResumeAction.Discard("The downloaded model is missing. Try again.")
         // Stop early, rather than fill the phone, when the server sends a different file.
         if ((dm.total > 0 && dm.total != pending.sizeBytes) || dm.done > pending.sizeBytes)
@@ -82,6 +81,13 @@ object DownloadRules {
             DmStatus.MISSING -> if (finalExists) ResumeAction.Verify else ResumeAction.Discard("The download was cancelled.")
         }
     }
+
+    /**
+     * Told on the next launch when a model never finished loading (it may crash the engine), for a
+     * download here and for the chat screen's "Load model" import ([ModelStore.recoverInterruptedImport]).
+     */
+    fun closedWhileStarting(modelName: String) =
+        "MySI closed while starting $modelName, so the file was deleted to be safe. Try again, or choose another model."
 
     const val WAITING_FOR_WIFI =
         "Waiting for Wi-Fi, as you chose. To use mobile data instead, cancel and start again with \"Wi-Fi only\" turned off."

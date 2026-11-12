@@ -124,6 +124,52 @@ class ModelStoreTest {
     }
 
     @Test
+    fun anImportThatNeverFinishedLoadingIsDeletedOnceWithAMessage() {
+        val older = touch(File(files, "models/1/old.litertlm"))
+        val crashed = touch(File(files, "models/2/embeddinggemma.litertlm"))
+        store.markImportLoading(crashed)
+        // A new process: the load never returned.
+        val fresh = ModelStore(files, external, kv)
+        assertEquals(
+            "MySI closed while starting embeddinggemma.litertlm, so the file was deleted to be safe. Try again, or choose another model.",
+            fresh.recoverInterruptedImport(older.path),
+        )
+        assertFalse(crashed.parentFile.exists())
+        assertTrue(older.isFile)
+        // Never retried, never told twice.
+        assertNull(fresh.recoverInterruptedImport(older.path))
+        assertTrue(kv.map.isEmpty())
+    }
+
+    @Test
+    fun anImportThatLoadedIsKeptEvenIfTheMarkWasLeft() {
+        val loaded = touch(File(files, "models/2/good.litertlm"))
+        store.markImportLoading(loaded)
+        assertNull(store.recoverInterruptedImport(loaded.path))
+        assertTrue(loaded.isFile)
+        assertTrue(kv.map.isEmpty())
+    }
+
+    @Test
+    fun aClearedOrForeignMarkDeletesNothing() {
+        val loaded = touch(File(files, "models/2/good.litertlm"))
+        store.markImportLoading(loaded)
+        store.clearImportLoading()
+        assertNull(store.recoverInterruptedImport(null))
+        assertTrue(loaded.isFile)
+        // Only a folder of the import directory is ever deleted.
+        val elsewhere = touch(File(root, "elsewhere/3/x.litertlm"))
+        val download = touch(File(external, "models/4/d.litertlm"))
+        for (f in listOf(elsewhere, download, File(files, "models/top.litertlm"))) {
+            store.markImportLoading(f)
+            assertNull(store.recoverInterruptedImport(null))
+        }
+        assertTrue(elsewhere.isFile)
+        assertTrue(download.isFile)
+        assertTrue(kv.map.isEmpty())
+    }
+
+    @Test
     fun withoutExternalStorageNothingBreaks() {
         val s = ModelStore(files, null, kv)
         s.pruneUnused(null, null)
