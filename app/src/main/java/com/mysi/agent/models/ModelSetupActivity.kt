@@ -63,6 +63,7 @@ class ModelSetupActivity : UiActivity() {
         wifiOnly = savedInstanceState?.getBoolean(KEY_WIFI) ?: prefs.getBoolean(KEY_WIFI, true)
         page = savedInstanceState?.getString(KEY_PAGE)?.let { runCatching { Page.valueOf(it) }.getOrNull() }
             ?: if (prefs.contains(KEY_USE)) Page.MAIN else Page.QUESTIONS
+        onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, onBackInvokedCallback)
         ModelSetup.resume(this, catalog)
         refreshCatalog()
     }
@@ -83,6 +84,7 @@ class ModelSetupActivity : UiActivity() {
     }
 
     override fun onDestroy() {
+        onBackInvokedDispatcher.unregisterOnBackInvokedCallback(onBackInvokedCallback)
         ui.cancel()
         super.onDestroy()
     }
@@ -95,14 +97,23 @@ class ModelSetupActivity : UiActivity() {
         outState.putBoolean(KEY_WIFI, wifiOnly)
     }
 
-    @Deprecated("Plain Activity back handling; this app has no AndroidX activity dependency.")
-    override fun onBackPressed() {
+    /**
+     * Back from a sub-page returns to the main page; otherwise the screen closes with its result.
+     * Android 16 delivers back (including the gesture) only to [onBackInvokedCallback]; Android 14
+     * and 15 call [onBackPressed] unless the app opts in to the new callback, so both lead here.
+     */
+    private fun back() {
         if (!ModelSetup.state.busy && (page == Page.OPTIONS || page == Page.UNTESTED)) return show(Page.MAIN)
         finishWithState()
         if (ModelSetup.state is SetupState.Done) ModelSetup.acknowledge()
-        @Suppress("DEPRECATION")
-        super.onBackPressed()
+        finish()
     }
+
+    private val onBackInvokedCallback = android.window.OnBackInvokedCallback { back() }
+
+    @android.annotation.SuppressLint("GestureBackNavigation") // Android 16+ uses onBackInvokedCallback, registered in onCreate.
+    @Deprecated("Plain Activity back handling; this app has no AndroidX activity dependency.")
+    override fun onBackPressed() = back()
 
     /** Sets the result the caller sees, whichever way the screen closes. */
     private fun finishWithState() {
