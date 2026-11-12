@@ -156,3 +156,14 @@
 #   MissingImageReaderException (an IOException) before touching it. MySI only extracts text,
 #   which does not decode images anyway.
 -dontwarn com.gemalto.jp2.JP2Decoder
+
+# ---------------------------------------------------------------------------------------------
+# Flogger 0.6 (com.google.flogger, used by MediaPipe's framework). FluentLogger.forEnclosingClass()
+# names a logger by walking the stack to the frame that called it, and the backend is found with
+# Class.forName("com.google.common.flogger.backend.system.DefaultPlatform"). Under R8 the call was
+# inlined into MediaPipe's Graph.<clinit>, the stack walk found no FluentLogger frame, and
+# MediaPipe failed to start on the emulator ("ExceptionInInitializerError ... no caller found on
+# the stack"), so live vision reported "Object detection is not available". Stack-walking code
+# cannot be made safe member by member, so the whole (small: 160 classes) package keeps its names
+# and is not optimised.
+-keep class com.google.common.flogger.** { *; }
