@@ -23,9 +23,10 @@ import kotlinx.coroutines.withContext
  * check, load and a short speed test.
  *
  * Result contract (start with [intent] and `startActivityForResult`):
- * - [android.app.Activity.RESULT_OK]: a model was downloaded, checked and loaded; [Agent.ready]
- *   is true and [Agent.savedModel] is its path. Extras: [EXTRA_MODEL_PATH] (absolute path) and
- *   [EXTRA_MODEL_ID] (catalogue id, e.g. "gemma-4-e2b").
+ * - [android.app.Activity.RESULT_OK]: a model was downloaded, checked and loaded during this visit
+ *   (also when the user then started a second download and left before it finished); [Agent.ready]
+ *   is true and [Agent.savedModel] is its path. Extras: [EXTRA_MODEL_PATH] (absolute path, always)
+ *   and [EXTRA_MODEL_ID] (catalogue id, e.g. "gemma-4-e2b"; present when known).
  * - [RESULT_USE_OWN_FILE]: the user tapped "Use a file I already have"; open the existing file
  *   picker ("Load model"). No extras.
  * - [android.app.Activity.RESULT_CANCELED]: the user left without a new model. When a download
@@ -37,8 +38,8 @@ import kotlinx.coroutines.withContext
  * - [pruneUnusedModels]: call after the chat screen loads a model of its own (its "Load model"
  *   import), so models downloaded here that are no longer used are deleted.
  *
- * Uses from [UiActivity]: shell, body, text, button, card, row, column, space, dp, shape, ink, muted,
- * surface, sans and serif.
+ * Uses from [UiActivity]: shell, body, scroll, text, button, card, space, dp, ink, muted, sans and
+ * serif.
  */
 class ModelSetupActivity : UiActivity() {
     private enum class Page { QUESTIONS, MAIN, OPTIONS, UNTESTED }
@@ -57,6 +58,7 @@ class ModelSetupActivity : UiActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         shell("Get a model")
+        modelOnEntry = if (savedInstanceState?.containsKey(KEY_ENTRY) == true) savedInstanceState.getString(KEY_ENTRY) else Agent.savedModel
         catalogs = CatalogRepository(this)
         catalog = catalogs.current()
         use = savedInstanceState?.getString(KEY_USE)?.let(::useOf) ?: prefs.getString(KEY_USE, null)?.let(::useOf) ?: Use.CHAT
@@ -93,6 +95,7 @@ class ModelSetupActivity : UiActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(KEY_PAGE, page.name)
+        outState.putString(KEY_ENTRY, modelOnEntry)
         outState.putString(KEY_USE, use.name)
         outState.putString(KEY_PRIORITY, priority.name)
         outState.putBoolean(KEY_WIFI, wifiOnly)
@@ -118,11 +121,23 @@ class ModelSetupActivity : UiActivity() {
 
     /** Sets the result the caller sees, whichever way the screen closes. */
     private fun finishWithState() {
-        when (val s = ModelSetup.state) {
-            is SetupState.Done -> setResult(RESULT_OK, Intent().putExtra(EXTRA_MODEL_PATH, s.path).putExtra(EXTRA_MODEL_ID, s.modelId))
+        val s = ModelSetup.state
+        val now = Agent.savedModel
+        when {
+            s is SetupState.Done -> setResult(RESULT_OK, Intent().putExtra(EXTRA_MODEL_PATH, s.path).putExtra(EXTRA_MODEL_ID, s.modelId))
+            // A model loaded during this visit, then the user started another and left.
+            Agent.ready && now != null && now != modelOnEntry ->
+                setResult(RESULT_OK, Intent().putExtra(EXTRA_MODEL_PATH, now).putExtra(EXTRA_SETUP_PENDING, s.busy).apply {
+                    loadedId?.takeIf { lastLoadedPath == now }?.let { putExtra(EXTRA_MODEL_ID, it) }
+                })
             else -> setResult(RESULT_CANCELED, Intent().putExtra(EXTRA_SETUP_PENDING, s.busy))
         }
     }
+
+    /** The model loaded when the screen opened, to tell whether this visit changed it. */
+    private var modelOnEntry: String? = null
+    private var loadedId: String? = null
+    private var lastLoadedPath: String? = null
 
     // ---------------- data ----------------
 
@@ -132,10 +147,26 @@ class ModelSetupActivity : UiActivity() {
                 val store = ModelStore.of(this@ModelSetupActivity)
                 // Leftovers from an earlier attempt or an old model take space; clear them first.
                 if (!ModelSetup.running) store.pruneUnused(Agent.savedModel, store.loadPending())
-                DeviceProfiles.read(this@ModelSetupActivity, store.externalDir)
+                debugOverride(DeviceProfiles.read(this@ModelSetupActivity, store.externalDir))
             }
             render()
         }
+    }
+
+    /**
+     * Debug builds only: pretend to be a phone with [EXTRA_DEBUG_RAM_GB] of memory and
+     * [EXTRA_DEBUG_FREE_GB] of free storage, to see every screen on an emulator
+     * (`adb shell am start -n com.mysi.agent/.models.ModelSetupActivity --ei debug_ram_gb 8`).
+     * Downloads still check the real free space.
+     */
+    private fun debugOverride(d: DeviceProfile): DeviceProfile {
+        if (!com.mysi.agent.BuildConfig.DEBUG) return d
+        val gb = intent.getIntExtra(EXTRA_DEBUG_RAM_GB, 0)
+        val free = intent.getIntExtra(EXTRA_DEBUG_FREE_GB, 0)
+        var out = d
+        if (gb > 0) out = out.copy(advertisedRamBytes = gb * Format.GIB, totalRamBytes = (gb * Format.GIB * 0.93).toLong(), availableRamBytes = (gb * Format.GIB * 0.45).toLong())
+        if (free > 0) out = out.copy(freeStorageBytes = free * 1_000_000_000L)
+        return out
     }
 
     private fun refreshCatalog() {
@@ -277,7 +308,8 @@ class ModelSetupActivity : UiActivity() {
 
     /** What the download is: size, where it comes from, and its licence. */
     private fun source(c: LinearLayout, e: ModelEntry) =
-        text(c, "${Format.size(e.sizeBytes)}, downloaded from Google's page on Hugging Face (huggingface.co/${e.repo}). Licence: ${e.licenceText}. Checked against its published fingerprint before use.", 12f, muted)
+        text(c, "${Format.size(e.sizeBytes)}, downloaded from Google's page on Hugging Face (huggingface.co/${e.repo}). Licence: ${e.licenceText}. Checked against its published fingerprint before use." +
+            if (Agent.ready) " Starting it replaces the model in use and clears the current chat." else "", 12f, muted)
 
     private fun wifiSwitch(c: LinearLayout, d: DeviceProfile) {
         val sw = Switch(this).apply {
@@ -411,7 +443,7 @@ class ModelSetupActivity : UiActivity() {
             is SetupState.Downloading -> {
                 heading(c, "Downloading ${s.name}", 20f)
                 val v = Live(s.javaClass, bar(c, 0, 0, ""), text(c, "", 15f), text(c, "", 13f, muted))
-                text(c, "You can leave this screen or close MySI; the download carries on. Open this screen again to finish.", 12f, muted)
+                text(c, "You can leave this screen; the download carries on and MySI starts the model when it's done, which clears the current chat. If MySI is closed meanwhile, open this screen again to finish.", 12f, muted)
                 button(c, "Cancel download") { ModelSetup.cancel(this) }
                 live = v
                 updateDownload(v, s)
@@ -434,6 +466,8 @@ class ModelSetupActivity : UiActivity() {
                 text(c, "Testing how fast it replies on this phone…", 14f, muted)
             }
             is SetupState.Done -> {
+                loadedId = s.modelId
+                lastLoadedPath = s.path
                 setResult(RESULT_OK, Intent().putExtra(EXTRA_MODEL_PATH, s.path).putExtra(EXTRA_MODEL_ID, s.modelId))
                 heading(c, "${s.name} is ready", 22f)
                 text(c, s.verdict?.message ?: "It's loaded and ready to chat.", 15f)
@@ -472,8 +506,11 @@ class ModelSetupActivity : UiActivity() {
         const val EXTRA_MODEL_PATH = "com.mysi.agent.models.MODEL_PATH"
         const val EXTRA_MODEL_ID = "com.mysi.agent.models.MODEL_ID"
         const val EXTRA_SETUP_PENDING = "com.mysi.agent.models.SETUP_PENDING"
+        private const val EXTRA_DEBUG_RAM_GB = "debug_ram_gb"
+        private const val EXTRA_DEBUG_FREE_GB = "debug_free_gb"
 
         private const val KEY_PAGE = "page"
+        private const val KEY_ENTRY = "model_on_entry"
         private const val KEY_USE = "use"
         private const val KEY_PRIORITY = "priority"
         private const val KEY_WIFI = "wifi_only"

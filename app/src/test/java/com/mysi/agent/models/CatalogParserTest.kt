@@ -78,10 +78,15 @@ class CatalogParserTest {
     fun debugTestEntryIsValidOnlyWhereTestEntriesAreAllowed() {
         val debug = File("src/debug/assets/models-debug.json").readText()
         val c = valid(debug, allowTestOnly = true, requireVerified = false)
-        val t = c.models.single()
-        assertTrue(t.testOnly)
-        assertFalse(t.verified)
-        assertEquals(164_626_432L, t.sizeBytes)
+        assertEquals(listOf("test-embeddinggemma-270m", "test-wrong-fingerprint"), c.models.map { it.id })
+        c.models.forEach { t ->
+            assertTrue(t.testOnly)
+            assertFalse(t.verified)
+            assertEquals(164_626_432L, t.sizeBytes)
+        }
+        assertEquals("2d079ee2f6f066b1f368e8d7c819f55214eaef1d0513b312321901f30ab286fb", c.models[0].sha256)
+        // The second entry exists to prove a mismatch is caught on a real device.
+        assertEquals("0".repeat(64), c.models[1].sha256)
         // The same file is refused as a normal catalogue, so a remote copy can never add test entries.
         assertTrue(problem(debug).contains("test entries are not allowed"))
     }
