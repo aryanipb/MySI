@@ -55,4 +55,15 @@ object ModelButton {
      * to a screen they just left.
      */
     fun openSetupOnItsOwn(setupPending: Boolean, alreadyShown: Boolean): Boolean = setupPending && !alreadyShown
+
+    /**
+     * Whether a setup result came from the screen itself. When it closes on its own it sets either
+     * [ModelSetupActivity.RESULT_USE_OWN_FILE] or a result with an Intent (finishWithState).
+     * RESULT_CANCELED without an Intent is Android cleaning up after the app died with the setup
+     * screen open (seen on the emulator when the low-memory killer stopped MySI while a model was
+     * starting): the user never left it, so the chat screen may open it once more, where the
+     * interrupted setup reports what happened.
+     */
+    fun closedByUser(resultCode: Int, hasResultIntent: Boolean): Boolean =
+        resultCode != Activity.RESULT_CANCELED || hasResultIntent
 }

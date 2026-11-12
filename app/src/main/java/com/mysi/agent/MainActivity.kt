@@ -831,7 +831,9 @@ class MainActivity : UiActivity(), Host {
 
     /** The model setup screen closed (see its result contract in ModelSetupActivity). */
     private fun setupClosed(resultCode: Int, data: Intent?) {
-        setupShown = true
+        // A cancel without an Intent means Android removed the setup screen because the app died
+        // (for example while a model was starting), so it may open once more.
+        if (ModelButton.closedByUser(resultCode, data != null)) setupShown = true
         val pending = data?.getBooleanExtra(ModelSetupActivity.EXTRA_SETUP_PENDING, false) == true
         when (ModelButton.afterSetup(resultCode, pending)) {
             ModelButton.After.Loaded -> status.text = readyText()

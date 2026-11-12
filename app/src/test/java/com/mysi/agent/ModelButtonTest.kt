@@ -35,6 +35,19 @@ class ModelButtonTest {
     }
 
     @Test
+    fun onlyAResultFromTheScreenItselfCountsAsLeavingIt() {
+        assertTrue(ModelButton.closedByUser(0, hasResultIntent = true))
+        assertTrue(ModelButton.closedByUser(-1, hasResultIntent = true))
+        // "Use a file I already have" has no extras.
+        assertTrue(ModelButton.closedByUser(1, hasResultIntent = false))
+        // Android's own RESULT_CANCELED after the app died carries no Intent.
+        assertFalse(ModelButton.closedByUser(0, hasResultIntent = false))
+        val src = File("src/main/java/com/mysi/agent/models/ModelSetupActivity.kt").readText()
+        // The screen itself never cancels without an Intent; its only Intent-less result is RESULT_USE_OWN_FILE.
+        assertEquals(listOf("RESULT_USE_OWN_FILE"), Regex("""setResult\((RESULT_\w+)\)""").findAll(src).map { it.groupValues[1] }.toList())
+    }
+
+    @Test
     fun theNoModelTextNoLongerSendsTheUserToTheInternet() {
         assertFalse(ModelButton.NO_MODEL.contains("huggingface", ignoreCase = true))
         assertTrue(ModelButton.NO_MODEL.contains(ModelButton.GET))
