@@ -180,6 +180,45 @@ class StoresTest {
     }
 
     @Test
+    fun memoryScreenAddsListsEverythingAndDeletesAll() {
+        var now = 1L
+        val book = MemoryBook(FakeMemoryStore()) { now++ }
+        // Adding from the screen goes through remember: cleaned, deduplicated, topic defaulted.
+        val a = book.remember("  Likes   tea ", " ")
+        assertEquals("Likes tea", book.get(a.id)!!.text)
+        assertEquals("general", book.get(a.id)!!.topic)
+        assertTrue(book.remember("likes TEA", "drinks").duplicate)
+        repeat(250) { book.remember("Fact $it", "") }
+        // listAll is not capped at a page of 200, and keeps list's order (newest change first).
+        val all = book.listAll()
+        assertEquals(251, all.size)
+        assertEquals("Fact 249", all.first().text)
+        assertEquals(book.list(0, 200), all.take(200))
+        assertEquals(251, book.clear())
+        assertEquals(0, book.count())
+        assertEquals(0, book.clear())
+    }
+
+    @Test
+    fun anEditCannotDuplicateAnotherMemoryOrBeEmpty() {
+        val book = MemoryBook(FakeMemoryStore())
+        val tea = book.remember("Likes tea", "").id
+        val pune = book.remember("Lives in Pune", "").id
+        for (bad in listOf("LIKES TEA", "", "  ", "x".repeat(MemoryBook.MAX_CHARS + 1))) {
+            try {
+                book.update(pune, bad, "")
+                fail("accepted '$bad'")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(e.message!!.isNotBlank())
+            }
+        }
+        assertEquals("Lives in Pune", book.get(pune)!!.text)
+        // Changing only the case or the topic of the same memory is fine.
+        assertTrue(book.update(tea, "likes tea", "drinks"))
+        assertEquals("drinks", book.get(tea)!!.topic)
+    }
+
+    @Test
     fun memoriesMustBeShortAndNonEmpty() {
         val book = MemoryBook(FakeMemoryStore())
         for (bad in listOf("", "   ", "x".repeat(MemoryBook.MAX_CHARS + 1))) {

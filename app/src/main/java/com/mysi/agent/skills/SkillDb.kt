@@ -181,6 +181,9 @@ internal class SqlMemoryStore(private val helper: SkillDb) : MemoryStore {
         }, "id = ?", arrayOf(id.toString())) > 0
 
     override fun delete(id: Long): Boolean = db.delete("memories", "id = ?", arrayOf(id.toString())) > 0
+
+    // "1" makes SQLite count the deleted rows instead of truncating without a count.
+    override fun clear(): Int = db.delete("memories", "1", null)
 }
 
 internal class SqlPlannerStore(private val helper: SkillDb) : PlannerStore {

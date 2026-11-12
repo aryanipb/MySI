@@ -130,6 +130,22 @@ class AttachmentsTest {
     }
 
     @Test
+    fun otherFilesAreNamedByPathAndNeverSentAsMedia() {
+        val pdf = Attachment.Document(File("/cache/picked/1/report.pdf"))
+        assertEquals("file", pdf.kind)
+        assertEquals("[file: report.pdf at /cache/picked/1/report.pdf]", Attachments.stub(pdf))
+        assertEquals(listOf(photo), Attachments.sendable(listOf(pdf, photo), canSee = true, canHear = true))
+        assertEquals(0, Attachments.tokens(pdf))
+        val note = Attachments.note(listOf(photo, pdf), listOf(photo), canSee = true, canHear = true)
+        assertTrue(note, note.startsWith("\n\nThe user attached:\n"))
+        assertTrue(note, note.contains("- [file: report.pdf at /cache/picked/1/report.pdf] (a file the user picked; open it with the document, data or file tools using this path)"))
+        assertTrue(note, note.contains("- [image: a.jpg at /ws/Photos/a.jpg] (attached)"))
+        // Its name helps routing; pictures and recordings are routed by their kind instead.
+        assertEquals("summarise this report.pdf", Attachments.routingText("summarise this", listOf(photo, pdf)))
+        assertEquals("hi", Attachments.routingText("hi", listOf(photo, voice)))
+    }
+
+    @Test
     fun mediaCountsInTheWindowBudget() {
         val plain = Tokens.estimate(Entry.User("what is this"))
         assertEquals(plain + Attachments.IMAGE_TOKENS, Tokens.estimate(Entry.User("what is this", listOf(photo))))

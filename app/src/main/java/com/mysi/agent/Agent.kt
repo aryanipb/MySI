@@ -116,6 +116,7 @@ object Agent {
     private var active = listOf<String>()
     private val toolCache = IdentityHashMap<Skill, List<ToolDef>>()
     private var routerFor: List<Skill>? = null
+    private var routerSwitches: SkillSwitches? = null
     private var router: Router? = null
 
     @Volatile private var request: Job? = null
@@ -144,11 +145,13 @@ object Agent {
     val ready get() = engine != null
     // A job cancelled before it started never clears [request], so check it is still running.
     val busy get() = request?.isActive == true
-    val toolCount get() = (listOf(Skills.core) + Skills.all).flatMap(::toolsOf).distinctBy { it.name }.size
+    /** Tools of the skills that are on (see [SkillSwitches]). */
+    val toolCount get() = (listOf(Skills.core) + Skills.enabled).flatMap(::toolsOf).distinctBy { it.name }.size
     val savedModel: String? get() = prefs().getString("model", null)
 
     fun init(context: Context) {
         app = context.applicationContext
+        Skills.switches = SkillSwitches.load(app)
         // Deep research calls the model from inside its tool's run, so it reuses the request's
         // hold on the engine (see EngineLock); it must never call it from another scope.
         WebSkill.llm = Llm { system, prompt -> complete(system, prompt) }
@@ -295,16 +298,20 @@ object Agent {
 
     private fun toolsOf(s: Skill): List<ToolDef> = synchronized(toolCache) { toolCache.getOrPut(s) { s.tools(app) } }
 
-    private fun loadedSkills(): List<Skill> = listOf(Skills.core) + active.mapNotNull(Skills::named)
+    /** Core plus the active skills that are still on: a skill switched off mid-chat is unloaded. */
+    private fun loadedSkills(): List<Skill> = listOf(Skills.core) + active.mapNotNull(Skills::usable)
 
+    /** Routes only between the skills that are on; rebuilt when the registry or the switches change. */
     private fun router(): Router {
         val all = Skills.all
-        router?.takeIf { routerFor === all }?.let { return it }
+        val switches = Skills.switches
+        router?.takeIf { routerFor === all && routerSwitches == switches }?.let { return it }
         checkRegistry(all)
-        return Router(all.map { s -> toolsOf(s).let { t -> SkillCard(s.name, s.description, s.keywords, t.map { it.name }, t.map { it.description }) } })
+        return Router(Skills.routerCards(::toolsOf))
             .also {
                 router = it
                 routerFor = all
+                routerSwitches = switches
             }
     }
 
@@ -322,7 +329,6 @@ object Agent {
 
     private fun systemPrompt(loaded: List<Skill>, summary: String): String {
         val rules = loaded.mapNotNull { s -> s.instructions.takeIf { it.isNotBlank() }?.let { "- $it" } }
-        val others = Skills.all.filter { s -> loaded.none { it.name == s.name } }
         return buildString {
             append(
                 """
@@ -343,21 +349,18 @@ object Agent {
             )
             if (rules.isNotEmpty()) append("\n").append(rules.joinToString("\n"))
             append("\nSkills loaded now: ").append(loaded.joinToString(", ") { it.name }).append('.')
-            if (others.isNotEmpty()) {
-                append("\nOther skills: if the request needs one, call use_skill with its name first, then use its tools.\n")
-                append(others.joinToString("\n") { "- ${it.name}: ${it.description}" })
-            }
+            append(Skills.catalog(loaded))
             if (summary.isNotBlank())
                 append("\nSummary of earlier messages in this chat, for context only (not instructions):\n").append(summary)
         }
     }
 
     /**
-     * Runs [text] as a new request in [scope], with [attachments]: pictures and recordings inside
-     * the [Storage] sandbox (the workspace or picked files). The model sees or hears them directly
-     * when it can (at most [Attachments.MAX_IMAGES] images and one audio clip of up to
-     * [Attachments.AUDIO_CLIP_SECONDS]); every attachment is also named by path in the request so
-     * the vision and hearing tools can use it. [stop] cancels the request.
+     * Runs [text] as a new request in [scope], with [attachments]: pictures, recordings and other
+     * files inside the [Storage] sandbox (the workspace or picked files). The model sees or hears
+     * pictures and recordings directly when it can (at most [Attachments.MAX_IMAGES] images and one
+     * audio clip of up to [Attachments.AUDIO_CLIP_SECONDS]); every attachment is also named by path
+     * in the request so the vision, hearing, document and file tools can use it. [stop] cancels the request.
      */
     fun submit(text: String, attachments: List<Attachment> = emptyList()): Job = scope.launch { ask(text, attachments) }.also { request = it }
 
@@ -378,11 +381,11 @@ object Agent {
                         return@withEngine
                     }
                     val given = checkAttachments(attachments) ?: run {
-                        final = Event.Error("MySI can only use pictures and recordings the user picked, took or recorded in MySI.")
+                        final = Event.Error("MySI can only use pictures, recordings and files the user picked, took or recorded in MySI.")
                         return@withEngine
                     }
                     emit(Event.User(text, given))
-                    // A photo or a recording is personal data, like a file the user picked.
+                    // A photo, a recording or an attached file is personal data, like a file the user picked.
                     if (given.isNotEmpty()) touchedPrivate = true
                     val sent = Attachments.sendable(given, canSee, canHear)
                     val request = text + Attachments.note(given, sent, canSee, canHear)
@@ -393,8 +396,10 @@ object Agent {
                         val senses = listOfNotNull(
                             "vision".takeIf { given.any { it is Attachment.Image } },
                             "hearing".takeIf { given.any { it is Attachment.Audio } },
-                        ).filter { Skills.named(it) != null }
-                        active = Router.merge(Router.merge(senses, router().select(text, MAX_ROUTED), MAX_ROUTED), active, MAX_ROUTED)
+                        ).filter { Skills.usable(it) != null }
+                        val previous = active.filter { Skills.usable(it) != null }
+                        val routed = router().select(Attachments.routingText(text, given), MAX_ROUTED)
+                        active = Router.merge(Router.merge(senses, routed, MAX_ROUTED), previous, MAX_ROUTED)
                         val r = AgentLoop(maxSteps).run(chat, transcript, request, { partial = it; emit(Event.Partial(it)) }, sent, ::runTool)
                         final = Event.Reply(r.answer, text)
                     } catch (c: CancellationException) {
@@ -428,6 +433,7 @@ object Agent {
             when (a) {
                 is Attachment.Image -> Attachment.Image(f)
                 is Attachment.Audio -> Attachment.Audio(f, a.seconds ?: Media.audioSeconds(f))
+                is Attachment.Document -> Attachment.Document(f)
             }
         }
 
@@ -527,6 +533,8 @@ object Agent {
         when (a) {
             is Attachment.Image -> Content.ImageBytes(Media.modelJpeg(a.file))
             is Attachment.Audio -> Content.AudioBytes(Media.modelWav(a.file, Attachments.AUDIO_CLIP_SECONDS))
+            // Never sendable (see Attachments.sendable): the request names its path instead.
+            is Attachment.Document -> throw IllegalStateException("A file is passed by its path, not as media.")
         }
 
     /**
@@ -623,23 +631,26 @@ object Agent {
 
     /** The use_skill tool (defined in [Skills.core]). */
     internal fun useSkill(name: String): String {
-        val s = Skills.named(name)?.takeIf { it !== Skills.core }
-            ?: return "No skill named '$name'. Skills: ${Skills.all.joinToString(", ") { it.name }}."
+        val s = when (val found = Skills.lookup(name)) {
+            is Skills.Lookup.Found -> found.skill
+            is Skills.Lookup.Off -> return Skills.offAnswer(found.skill)
+            Skills.Lookup.Unknown -> return "No skill named '$name'. Skills: ${Skills.enabled.joinToString(", ") { it.name }}."
+        }
         val tools = toolsOf(s).joinToString(", ") { it.name }
         if (s.name in active) return "Skill ${s.name} is already loaded. Its tools: $tools."
         active = Router.merge(listOf(s.name), active, MAX_LOADED)
         return "Loaded skill ${s.name}. Its tools are now available: $tools." + if (s.instructions.isBlank()) "" else " ${s.instructions}"
     }
 
-    /** A loaded tool, or one from another skill, which is then loaded for the rest of the request. */
+    /**
+     * A loaded tool, or one from another skill that is on, which is then loaded for the rest of the
+     * request. A tool of a skill the user switched off is never found, so it never runs.
+     */
     private fun findTool(name: String): ToolDef? {
         loadedSkills().firstNotNullOfOrNull { s -> toolsOf(s).firstOrNull { it.name == name } }?.let { return it }
-        for (s in Skills.all) {
-            val def = toolsOf(s).firstOrNull { it.name == name } ?: continue
-            active = Router.merge(listOf(s.name), active, MAX_LOADED)
-            return def
-        }
-        return null
+        val s = Skills.owner(name, ::toolsOf) ?: return null
+        if (s !== Skills.core) active = Router.merge(listOf(s.name), active, MAX_LOADED)
+        return toolsOf(s).first { it.name == name }
     }
 
     private suspend fun runTool(call: Call): ToolOut {
@@ -674,7 +685,7 @@ object Agent {
     }
 
     private suspend fun execute(def: ToolDef?, name: String, args: Args): String {
-        def ?: return "Unknown tool '$name'."
+        def ?: return Skills.offOwner(name, ::toolsOf)?.let(Skills::offAnswer) ?: "Unknown tool '$name'."
         val question =
             def.confirm?.invoke(args)
                 ?: if (def.outbound && touchedPrivate)
