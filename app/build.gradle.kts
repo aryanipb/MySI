@@ -64,7 +64,19 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 shrinks, optimises and obfuscates the release; app/proguard-rules.pro lists what
+            // native code and reflection need kept, and why. mapping.txt (for de-obfuscating Play
+            // crash reports) is written to app/build/outputs/mapping/release/.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Puts native symbol tables in the app bundle for Play's crash reports. Today every
+            // shipped .so (LiteRT-LM, MediaPipe, CameraX) is a prebuilt that its publisher already
+            // stripped (no .symtab or debug sections), so AGP finds nothing to extract and the
+            // bundle carries no BUNDLE-METADATA/com.android.tools.build.debugsymbols; Play shows
+            // native frames as offsets plus the libraries' exported (.dynsym) names. Kept so any
+            // native library that does carry symbols is covered without another change.
+            ndk { debugSymbolLevel = "SYMBOL_TABLE" }
             signingConfig = signingConfigs.getByName(if (releaseKeystore != null) "release" else "debug")
         }
     }
