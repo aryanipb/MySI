@@ -27,6 +27,14 @@ whether or not R8 keeps any of their code.
 | MediaPipe Tasks Vision, Audio and Core (`com.google.mediapipe:tasks-vision`, `tasks-audio`, `tasks-core`), with the native library `libmediapipe_tasks_jni.so` | 0.10.35 | Apache-2.0 | https://github.com/google-ai-edge/mediapipe |
 | CameraX core, camera2, lifecycle, view (`androidx.camera:*`), with the native libraries `libimage_processing_util_jni.so` and `libsurface_util_jni.so` | 1.6.2 | Apache-2.0 (camera-core's POM also lists BSD-3-Clause) | https://developer.android.com/jetpack/androidx/releases/camera |
 
+LiteRT-LM's native library is built from many open-source components. The LiteRT-LM 0.18.1 AAR
+lists them, with each one's full licence text, in its `THIRD_PARTY_NOTICE.txt` (about 41,000
+lines), which those licences require to accompany the app: among them Abseil, BoringSSL, Brotli,
+Eigen 3 (MPL-2.0), FlatBuffers, Halide, HighwayHash, ICU4C, KleidiAI, LLVM, OpenCV, Protocol
+Buffers, RE2, SwiftShader, TCMalloc, TensorFlow, Tink, XNNPACK and Zstandard, under Apache-2.0,
+BSD, MIT, MPL-2.0 and similar terms. That file is not yet copied into this repository or the
+app; it should ship with the app or be linked from it before release.
+
 ### Libraries those bring in
 
 | Library | Version | Licence |
