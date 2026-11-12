@@ -13,7 +13,7 @@ object ModelButton {
     const val SHOW_DOWNLOAD = "Show download"
 
     const val NO_MODEL =
-        "No model loaded. Tap Get a model: MySI suggests one that suits this phone and sets it up, or you can use a .litertlm file you already have."
+        "No model loaded. Tap Get a model: MySI picks one that suits this phone, downloads it and starts it, or you can use a .litertlm file you already have."
     const val DOWNLOADING =
         "A model is still downloading. MySI starts it when it's done; tap Show download to see how far it has got."
 
@@ -48,13 +48,24 @@ object ModelButton {
         }
 
     /**
-     * Whether the chat screen opens the setup screen by itself: only when a download or its check
-     * is unfinished (for example after MySI was closed or killed, so the setup screen can pick it
-     * up and finish it), and only once per process. After that, or once the user has left the
-     * setup screen, the button and status line offer it instead, so the user is never sent back
-     * to a screen they just left.
+     * Whether the chat screen opens the setup screen by itself: when there is no model at all (so
+     * a new user gets one without looking for a button), or when a download or its check is
+     * unfinished (for example after MySI was closed or killed, so the setup screen can pick it up
+     * and finish it). Only once per process: after that, or once the user has left the setup
+     * screen, the button and status line offer it instead, so the user is never sent back to a
+     * screen they just left.
      */
-    fun openSetupOnItsOwn(setupPending: Boolean, alreadyShown: Boolean): Boolean = setupPending && !alreadyShown
+    fun openSetupOnItsOwn(setupPending: Boolean, alreadyShown: Boolean, noModel: Boolean = false): Boolean =
+        (setupPending || noModel) && !alreadyShown
+
+    /**
+     * Whether the setup screen starts the recommended download without a tap: only when the chat
+     * screen opened it because there was no model, at most once per visit, with nothing already
+     * running, a recommendation for this phone, and Wi-Fi (or another unmetered connection), so
+     * gigabytes are never spent on mobile data without the user choosing to.
+     */
+    fun startDownloadOnItsOwn(openedForNoModel: Boolean, alreadyTried: Boolean, idle: Boolean, hasRecommendation: Boolean, unmetered: Boolean): Boolean =
+        openedForNoModel && !alreadyTried && idle && hasRecommendation && unmetered
 
     /**
      * Whether a setup result came from the screen itself. When it closes on its own it sets either
