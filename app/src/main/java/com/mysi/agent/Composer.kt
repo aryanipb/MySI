@@ -20,8 +20,12 @@ object Composer {
     /** A sound shorter than this is a slip of the finger, not a request. */
     const val MIN_RECORDING_SECONDS = 0.6
 
-    /** An attachment waiting in the composer, and an optional extra line for its chip. */
-    data class Chip(val attachment: Attachment, val hint: String = "")
+    /**
+     * An attachment waiting in the composer, and an optional extra line for its chip. [spoken] marks
+     * a recording the user made with the microphone button: only that is the user's own request; a
+     * picked audio file is content, never instructions.
+     */
+    data class Chip(val attachment: Attachment, val hint: String = "", val spoken: Boolean = false)
 
     /** What the files picker's result becomes, by MIME type. */
     fun attachmentFor(file: java.io.File, mime: String): Attachment =
@@ -32,15 +36,23 @@ object Composer {
         }
 
     /**
-     * The text to send with [attachments] when the user typed [typed], or null when there is
-     * nothing to send. With nothing typed, a recording is the request itself.
+     * Why [a] cannot be attached now, or null when it can. A picture needs a model that can see,
+     * whichever picker it came from.
      */
-    fun requestText(typed: String, attachments: List<Attachment>): String? {
+    fun refusal(a: Attachment, ready: Boolean, canSee: Boolean): String? =
+        if (a is Attachment.Image) Gate.photos(ready, canSee) else null
+
+    /**
+     * The text to send with [attachments] when the user typed [typed], or null when there is
+     * nothing to send. With nothing typed, a [spoken] recording is the request itself; other
+     * attachments only get a neutral stand-in.
+     */
+    fun requestText(typed: String, attachments: List<Attachment>, spoken: Boolean): String? {
         val t = typed.trim()
         return when {
             t.isNotEmpty() -> t
             attachments.isEmpty() -> null
-            attachments.any { it is Attachment.Audio } -> VOICE_PROMPT
+            spoken && attachments.any { it is Attachment.Audio } -> VOICE_PROMPT
             else -> ATTACH_PROMPT
         }
     }
@@ -108,6 +120,9 @@ class Draft {
     val chips: List<Composer.Chip> get() = items.toList()
 
     val isEmpty get() = items.isEmpty()
+
+    /** A recording made with the microphone button is waiting (e.g. one that could not be sent yet). */
+    val hasSpoken get() = items.any { it.spoken }
 
     /** How many more pictures fit in this message. */
     val imageSlots get() = Attachments.MAX_IMAGES - items.count { it.attachment is Attachment.Image }

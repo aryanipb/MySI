@@ -142,7 +142,7 @@ class MainActivity : UiActivity(), Host {
     override fun onResume() {
         super.onResume()
         inFront = true
-        // Skills switched on or off elsewhere change the tool count.
+        // The sense buttons and Send/Stop follow whatever happened while another screen was in front.
         syncBusy()
     }
 
@@ -249,12 +249,12 @@ class MainActivity : UiActivity(), Host {
 
     private fun send(voice: Attachment.Audio? = null) {
         val attachments = listOfNotNull(voice) + draft.attachments()
-        val q = Composer.requestText(input.text.toString(), attachments) ?: return
+        val q = Composer.requestText(input.text.toString(), attachments, spoken = voice != null || draft.hasSpoken) ?: return
         val blocked = if (Agent.busy) "MySI is still working. Wait, or tap Stop." else if (!Agent.ready) "Load a model first." else null
         if (blocked != null) {
             // Nothing is lost: a recording waits with the other attachments, the text stays typed.
             if (voice != null) {
-                draft.add(Composer.Chip(voice))
+                draft.add(Composer.Chip(voice, spoken = true))
                 renderChips()
             }
             return toast(blocked)
@@ -324,8 +324,11 @@ class MainActivity : UiActivity(), Host {
             val uris = if (clip != null) (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri } else listOfNotNull(data.data)
             if (uris.isEmpty()) return@launch
             val (files, skipped) = withContext(Dispatchers.IO) { Storage.importPicked(ctx, uris) }
-            val chips = files.map { f -> Composer.Chip(if (photos) Attachment.Image(f) else Composer.attachmentFor(f, Storage.mime(f))) }
-            val problems = chips.mapNotNull { draft.add(it) }
+            val picked = files.map { f -> Composer.Chip(if (photos) Attachment.Image(f) else Composer.attachmentFor(f, Storage.mime(f))) }
+            // A picture from the files picker still needs a model that can see.
+            val refused = picked.mapNotNull { c -> Composer.refusal(c.attachment, Agent.ready, Agent.canSee)?.let { c to it } }
+            val chips = picked - refused.map { it.first }.toSet()
+            val problems = refused.map { it.second } + chips.mapNotNull { draft.add(it) }
             shown?.get()?.renderChips()
             when {
                 skipped.isNotEmpty() -> toast("Could not attach ${skipped.joinToString(", ")}.")
@@ -357,9 +360,12 @@ class MainActivity : UiActivity(), Host {
 
     /** The removable chips above the text box. */
     private fun renderChips() {
+        val grew = draft.chips.size > chipsRow.childCount
         chipsRow.removeAllViews()
         val chips = draft.chips
         chipsScroll.visibility = if (chips.isEmpty()) View.GONE else View.VISIBLE
+        // A new chip is added at the end: bring it into view.
+        if (grew) chipsScroll.post { chipsScroll.fullScroll(View.FOCUS_RIGHT) }
         for (c in chips) {
             val pill = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -562,7 +568,8 @@ class MainActivity : UiActivity(), Host {
         if (!Agent.busy) return
         val (card, line) = working ?: card(log).let { c ->
             text(c, "Working", 11f, muted, bold = true).typeface = serif
-            val t = text(c, "", 14f).apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
+            // Not a live region: some jobs report a step every second, too often to read out.
+            val t = text(c, "", 14f)
             link(c, "Stop", "Stop this job") { Agent.stop() }.apply {
                 (layoutParams as LinearLayout.LayoutParams).gravity = Gravity.END
             }

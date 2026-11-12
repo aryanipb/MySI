@@ -48,6 +48,28 @@ class ComposerTest {
     }
 
     @Test
+    fun draftKnowsWhenASpokenRecordingWaits() {
+        val d = Draft()
+        d.add(Composer.Chip(Attachment.Audio(File("/cache/picked/1/song.mp3"))))
+        assertFalse(d.hasSpoken)
+        d.add(voice.copy(spoken = true))
+        assertTrue(d.hasSpoken)
+        d.remove(voice.copy(spoken = true))
+        assertFalse(d.hasSpoken)
+    }
+
+    @Test
+    fun picturesNeedAModelThatCanSeeFromAnyPicker() {
+        val photo = image(1).attachment
+        assertEquals(Composer.Gate.photos(ready = false, canSee = false), Composer.refusal(photo, ready = false, canSee = false))
+        assertNotNull(Composer.refusal(photo, ready = true, canSee = false))
+        assertNull(Composer.refusal(photo, ready = true, canSee = true))
+        // Files and recordings are named by path, so they need no sense.
+        assertNull(Composer.refusal(pdf.attachment, ready = false, canSee = false))
+        assertNull(Composer.refusal(voice.attachment, ready = true, canSee = false))
+    }
+
+    @Test
     fun draftUpdatesAChipInPlace() {
         val d = Draft()
         val bare = Composer.Chip(Attachment.Audio(File("/cache/picked/1/song.mp3")))
@@ -72,11 +94,14 @@ class ComposerTest {
 
     @Test
     fun requestTextUsesWhatWasTypedOrAStandIn() {
-        assertNull(Composer.requestText("   ", emptyList()))
-        assertEquals("hello", Composer.requestText("  hello ", emptyList()))
-        assertEquals("what is this?", Composer.requestText("what is this?", listOf(image(1).attachment)))
-        assertEquals(Composer.VOICE_PROMPT, Composer.requestText("", listOf(image(1).attachment, voice.attachment)))
-        assertEquals(Composer.ATTACH_PROMPT, Composer.requestText(" ", listOf(pdf.attachment)))
+        assertNull(Composer.requestText("   ", emptyList(), spoken = false))
+        assertEquals("hello", Composer.requestText("  hello ", emptyList(), spoken = false))
+        assertEquals("what is this?", Composer.requestText("what is this?", listOf(image(1).attachment), spoken = false))
+        assertEquals(Composer.VOICE_PROMPT, Composer.requestText("", listOf(image(1).attachment, voice.attachment), spoken = true))
+        assertEquals(Composer.ATTACH_PROMPT, Composer.requestText(" ", listOf(pdf.attachment), spoken = false))
+        // A picked audio file is content, not the user's request: it never gets the voice prompt.
+        assertEquals(Composer.ATTACH_PROMPT, Composer.requestText("", listOf(voice.attachment), spoken = false))
+        assertEquals("summarise it", Composer.requestText("summarise it", listOf(voice.attachment), spoken = true))
         // The chat shows what the user wrote, not the stand-ins.
         assertEquals("", Composer.shownText(Composer.VOICE_PROMPT))
         assertEquals("", Composer.shownText(Composer.ATTACH_PROMPT))
