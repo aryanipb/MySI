@@ -80,6 +80,12 @@
             android:exported="false"
             android:theme="@style/AppTheme" />
 
+        <!-- One-tap model setup: picks, downloads, checks and loads a model. Opened only by MySI. -->
+        <activity
+            android:name=".models.ModelSetupActivity"
+            android:exported="false"
+            android:theme="@style/AppTheme" />
+
         <receiver
             android:name=".ApprovalReceiver"
             android:exported="false" />
