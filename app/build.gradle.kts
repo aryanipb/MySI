@@ -18,8 +18,8 @@ android {
         minSdk = 34
         // Google Play requires API 36 for new apps and updates from 31 August 2026.
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.8"
+        versionCode = 9
+        versionName = "1.0"
 
         // Google Form pre-filled link that receives in-app AI content reports (Play's AI-Generated
         // Content policy), from gradle.properties or MYSI_REPORT_URL; release-signed builds fail without it.
