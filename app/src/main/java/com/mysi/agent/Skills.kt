@@ -87,8 +87,9 @@ object Skills {
         Skill(
             name = "files",
             description = "Take photos with the camera, and read or write plain text files in MySI's workspace.",
-            // Words about looking at a picture belong to the vision skill; these are about taking one.
-            keywords = listOf("selfie", "camera", "snap", "click", "txt", "text file", "save", "write", "folder", "workspace"),
+            // "photo" alone is left to the vision skill ("what is in this photo"); taking one still
+            // routes here through take_photo and these words.
+            keywords = listOf("picture", "pic", "image", "selfie", "camera", "snap", "click", "txt", "text file", "save", "write", "folder", "workspace"),
             instructions = "Files: take_photo returns the photo's path for the sharing tools. write_text_file saves plain text; for Word, Excel, PDF or other documents use the documents skill.",
             tools = group("files"),
         )

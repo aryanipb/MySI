@@ -40,12 +40,17 @@ object Attachments {
      */
     const val AUDIO_CLIP_SECONDS = 30.0
 
-    /** Window budget per image: Gemma's default vision budget is 256-280 soft tokens, plus markers. */
+    /**
+     * Window budget per image. An assumption, not a measured figure: Gemma 3n encodes an image as
+     * 256 soft tokens and Gemma 4's default vision budget is believed to be about 280; 300 leaves
+     * room for the image markers. Verify against a real model (ModelInfo.maxVisionTokenBudget).
+     */
     const val IMAGE_TOKENS = 300
 
     /**
-     * Window budget per second of audio. Gemma 3n encodes 6.25 tokens per second; Gemma 4's audio
-     * encoder is budgeted at 25 per second (one per 40 ms), the larger, safer figure.
+     * Window budget per second of audio. An assumption, not a measured figure: Gemma 3n's audio
+     * encoder is documented at 6.25 tokens per second, and Gemma 4's is assumed to be at most 25
+     * per second (one per 40 ms frame); the larger figure is the safer budget. Verify on a real model.
      */
     const val AUDIO_TOKENS_PER_SECOND = 25
 
@@ -79,8 +84,13 @@ object Attachments {
 
     /** The attachments the model takes directly: what it can see or hear, images up to [MAX_IMAGES], one audio clip. */
     fun sendable(given: List<Attachment>, canSee: Boolean, canHear: Boolean): List<Attachment> {
-        val images = if (canSee) given.filterIsInstance<Attachment.Image>().take(MAX_IMAGES) else emptyList()
-        val audio = if (canHear) given.filterIsInstance<Attachment.Audio>().take(1) else emptyList()
-        return given.filter { it in images || it in audio }
+        var images = 0
+        var audio = 0
+        return given.filter { a ->
+            when (a) {
+                is Attachment.Image -> (canSee && images < MAX_IMAGES).also { if (it) images++ }
+                is Attachment.Audio -> (canHear && audio < 1).also { if (it) audio++ }
+            }
+        }
     }
 }

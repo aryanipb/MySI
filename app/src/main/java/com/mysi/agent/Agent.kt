@@ -419,11 +419,11 @@ object Agent {
     }
 
     /**
-     * [attachments] resolved inside the [Storage] sandbox, with audio lengths filled in; null when
-     * one is outside it or missing.
+     * [attachments] resolved inside the [Storage] sandbox, each file once, with audio lengths
+     * filled in; null when one is outside it or missing.
      */
     private fun checkAttachments(attachments: List<Attachment>): List<Attachment>? =
-        attachments.map { a ->
+        attachments.distinctBy { it.kind to it.file.absolutePath }.map { a ->
             val f = Storage.resolve(app, a.file.absolutePath)?.takeIf { it.isFile } ?: return null
             when (a) {
                 is Attachment.Image -> Attachment.Image(f)

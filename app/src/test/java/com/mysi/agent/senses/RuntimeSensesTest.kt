@@ -113,6 +113,8 @@ class AttachmentsTest {
         assertEquals(listOf(voice), Attachments.sendable(listOf(photo, voice, longVoice), canSee = false, canHear = true))
         assertEquals(listOf(photo), Attachments.sendable(listOf(photo, voice), canSee = true, canHear = false))
         assertEquals(emptyList<Attachment>(), Attachments.sendable(listOf(photo, voice), canSee = false, canHear = false))
+        // The same picture attached repeatedly still counts against the limit each time.
+        assertEquals(Attachments.MAX_IMAGES, Attachments.sendable(List(6) { photo }, canSee = true, canHear = true).size)
     }
 
     @Test
