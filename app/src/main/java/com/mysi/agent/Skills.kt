@@ -151,6 +151,67 @@ object Skills {
 
     fun named(name: String): Skill? = if (name == core.name) core else all.firstOrNull { it.name.equals(name.trim(), true) }
 
+    /** What the user turned off on the Skills screen. Agent loads the saved choice when the app starts. */
+    @Volatile var switches = SkillSwitches()
+
+    /** The routable skills that are on, in [all]'s order. Only these are ever offered to the model. */
+    val enabled: List<Skill> get() = switches.let { s -> all.filter { s.allows(it.name) } }
+
+    /** [named], but null for a skill that is switched off. */
+    fun usable(name: String): Skill? = named(name)?.takeIf { switches.allows(it.name) }
+
+    /** What use_skill finds for a name. */
+    sealed interface Lookup {
+        data class Found(val skill: Skill) : Lookup
+
+        /** A real skill the user switched off. */
+        data class Off(val skill: Skill) : Lookup
+
+        data object Unknown : Lookup
+    }
+
+    /** The skill use_skill may load for [name]: never core (always loaded), never one that is off. */
+    fun lookup(name: String): Lookup {
+        val s = named(name)?.takeIf { it !== core } ?: return Lookup.Unknown
+        return if (switches.allows(s.name)) Lookup.Found(s) else Lookup.Off(s)
+    }
+
+    /** The skill that is on (core first) and owns the tool called [tool], or null. */
+    fun owner(tool: String, toolsOf: (Skill) -> List<ToolDef>): Skill? =
+        (listOf(core) + enabled).firstOrNull { s -> toolsOf(s).any { it.name == tool } }
+
+    /** The switched-off skill that owns the tool called [tool], so the model can be told why it cannot run. */
+    fun offOwner(tool: String, toolsOf: (Skill) -> List<ToolDef>): Skill? =
+        all.firstOrNull { s -> !switches.allows(s.name) && toolsOf(s).any { it.name == tool } }
+
+    /** The tool result when the model asks for a skill, or a skill's tool, that the user switched off. */
+    fun offAnswer(s: Skill) =
+        "The user turned off the ${s.name} skill on MySI's Skills screen, so it cannot be used. Tell the user they can turn it on again there."
+
+    /** The router's view of the skills that are on: a skill that is off can never be picked. */
+    fun routerCards(toolsOf: (Skill) -> List<ToolDef>): List<SkillCard> =
+        enabled.map { s -> toolsOf(s).let { t -> SkillCard(s.name, s.description, s.keywords, t.map { it.name }, t.map { it.description }) } }
+
+    /**
+     * The system prompt's lines about skills that are not [loaded]: the ones that are on, which the
+     * model can load with use_skill, and the names of those the user turned off, so the model can
+     * say why it cannot help instead of guessing.
+     */
+    fun catalog(loaded: List<Skill>): String {
+        val others = enabled.filter { s -> loaded.none { it.name == s.name } }
+        val off = all.filter { !switches.allows(it.name) }
+        return buildString {
+            if (others.isNotEmpty()) {
+                append("\nOther skills: if the request needs one, call use_skill with its name first, then use its tools.\n")
+                append(others.joinToString("\n") { "- ${it.name}: ${it.description}" })
+            }
+            if (off.isNotEmpty())
+                append("\nTurned off by the user on MySI's Skills screen, so not available: ")
+                    .append(off.joinToString(", ") { it.name })
+                    .append(". If a request needs one, say it is turned off and can be turned on again in Skills.")
+        }
+    }
+
     /**
      * What is wrong with a registry given as (skill name, its tool names) pairs: skill names used
      * twice (case-insensitively, as [named] matches them) and tool names that appear more than
