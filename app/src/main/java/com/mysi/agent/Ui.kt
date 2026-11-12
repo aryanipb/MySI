@@ -3,7 +3,10 @@ package com.mysi.agent
 import android.animation.ValueAnimator
 import android.app.Activity
 import android.content.Context
+import android.content.res.ColorStateList
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.PowerManager
@@ -12,6 +15,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.animation.DecelerateInterpolator
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -134,6 +138,42 @@ open class UiActivity : Activity() {
             )
         }
 
+    /** A square icon button in the same quiet surface as [button]. */
+    fun iconButton(parent: LinearLayout, icon: Int, description: String, action: () -> Unit) =
+        ImageView(this).apply {
+            setImageResource(icon)
+            imageTintList = ColorStateList.valueOf(ink)
+            background = shape(surface, 12)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(dp(11), dp(12), dp(11), dp(12))
+            isClickable = true
+            isFocusable = true
+            contentDescription = description
+            setOnClickListener { action() }
+            Design.press(this)
+            parent.addView(this, LinearLayout.LayoutParams(dp(44), dp(48)))
+        }
+
+    /** A small text action in muted ink, at least 48 dp tall for touch, like the privacy link. */
+    fun link(parent: LinearLayout, label: String, description: String = label, action: () -> Unit) =
+        TextView(this).apply {
+            text = label
+            textSize = 13f
+            typeface = Typeface.create(sans, Typeface.BOLD)
+            setTextColor(muted)
+            gravity = Gravity.CENTER
+            minHeight = dp(48)
+            minWidth = dp(48)
+            setPadding(dp(10), 0, dp(10), 0)
+            isClickable = true
+            isFocusable = true
+            contentDescription = description
+            setOnClickListener { action() }
+            parent.addView(this, LinearLayout.LayoutParams(-2, -2))
+        }
+
+    lateinit var titleBar: LinearLayout
+
     /** Black edge-to-edge shell with a title bar and a scrolling body. */
     fun shell(title: String) {
         root = column().apply { setBackgroundColor(Color.BLACK) }
@@ -149,7 +189,10 @@ open class UiActivity : Activity() {
         setContentView(root)
         root.requestApplyInsets()
         val bar = row(root).apply { setPadding(dp(18), dp(10), dp(18), 0) }
+        titleBar = bar
         text(bar, title, 26f).apply {
+            // Not selectable: a selectable title takes focus back from closed dialogs and shows a highlight.
+            setTextIsSelectable(false)
             typeface = serif
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
@@ -161,5 +204,31 @@ open class UiActivity : Activity() {
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         body = column().apply { setPadding(dp(18), dp(12), dp(18), dp(20)) }
         scroll.addView(body)
+    }
+}
+
+/** A thin rounded meter, e.g. the microphone level while recording. */
+class LevelBar(context: Context) : View(context) {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    var track = Color.rgb(48, 49, 57)
+    var fill = Color.WHITE
+
+    /** 0 to 1. */
+    var level = 0f
+        set(v) {
+            field = v.coerceIn(0f, 1f)
+            invalidate()
+        }
+
+    override fun onDraw(canvas: Canvas) {
+        val h = height.toFloat()
+        val r = h / 2
+        paint.color = track
+        canvas.drawRoundRect(0f, 0f, width.toFloat(), h, r, r, paint)
+        if (level > 0f) {
+            paint.color = fill
+            canvas.drawRoundRect(0f, 0f, maxOf(h, width * level), h, r, r, paint)
+        }
     }
 }

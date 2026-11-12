@@ -65,6 +65,15 @@
             </intent-filter>
         </activity>
 
+        <!-- The skills list with on/off switches, and what MySI remembers. Opened only by MySI. -->
+        <activity
+            android:name=".SkillsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".MemoryActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Live camera view with object detection; returns a saved frame. Opened only by MySI. -->
         <activity
             android:name=".senses.LiveVisionActivity"
