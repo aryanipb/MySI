@@ -92,7 +92,7 @@ class MainActivity : UiActivity(), Host {
         val actions = row(body)
         // The primary action opens model setup ("Get a model", "Change model" or "Show download");
         // its "Use a file I already have" leads to the file picker.
-        modelButton = button(actions, ModelButton.GET, true, ::openSetup).apply {
+        modelButton = button(actions, ModelButton.GET, true) { openSetup() }.apply {
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
         button(actions, "New chat", false) { Agent.newChat() }.layoutParams =
@@ -144,9 +144,9 @@ class MainActivity : UiActivity(), Host {
         modelButton.contentDescription = label
     }
 
-    private fun openSetup() {
+    private fun openSetup(auto: Boolean = false) {
         setupShown = true
-        startActivityForResult(ModelSetupActivity.intent(this), REQ_SETUP)
+        startActivityForResult(ModelSetupActivity.intent(this).putExtra(ModelSetupActivity.EXTRA_AUTO, auto), REQ_SETUP)
     }
 
     /**
@@ -180,7 +180,10 @@ class MainActivity : UiActivity(), Host {
         syncBusy()
         syncModelButton()
         // An interrupted download needs the setup screen to finish; open it once, then only offer it.
-        if (ModelButton.openSetupOnItsOwn(ModelSetupActivity.hasPendingSetup(this), setupShown)) openSetup()
+        // With no model at all it also opens by itself and starts the recommended download.
+        val pending = ModelSetupActivity.hasPendingSetup(this)
+        val noModel = !Agent.ready && Agent.savedModel?.let { File(it).canRead() } != true
+        if (ModelButton.openSetupOnItsOwn(pending, setupShown, noModel)) openSetup(auto = noModel && !pending)
     }
 
     override fun onDestroy() {

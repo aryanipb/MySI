@@ -35,6 +35,29 @@ class ModelButtonTest {
     }
 
     @Test
+    fun aPhoneWithNoModelOpensSetupByItselfOnlyOnce() {
+        assertTrue(ModelButton.openSetupOnItsOwn(setupPending = false, alreadyShown = false, noModel = true))
+        assertFalse(ModelButton.openSetupOnItsOwn(setupPending = false, alreadyShown = true, noModel = true))
+    }
+
+    @Test
+    fun theRecommendedDownloadStartsByItselfOnlyOnWifiAndOnlyOnce() {
+        fun starts(opened: Boolean = true, tried: Boolean = false, idle: Boolean = true, pick: Boolean = true, wifi: Boolean = true) =
+            ModelButton.startDownloadOnItsOwn(opened, tried, idle, pick, wifi)
+        assertTrue(starts())
+        // Opened from the button: the user chooses.
+        assertFalse(starts(opened = false))
+        // A cancel or a failure is not started again.
+        assertFalse(starts(tried = true))
+        // Something is already downloading, being checked, done or failed.
+        assertFalse(starts(idle = false))
+        // No model suits this phone.
+        assertFalse(starts(pick = false))
+        // Never gigabytes on mobile data without a tap.
+        assertFalse(starts(wifi = false))
+    }
+
+    @Test
     fun onlyAResultFromTheScreenItselfCountsAsLeavingIt() {
         assertTrue(ModelButton.closedByUser(0, hasResultIntent = true))
         assertTrue(ModelButton.closedByUser(-1, hasResultIntent = true))
@@ -58,7 +81,9 @@ class ModelButtonTest {
     fun theChatScreenFollowsTheSetupContract() {
         val src = File("src/main/java/com/mysi/agent/MainActivity.kt").readText()
         // Its primary action opens model setup; the file picker is reached through setup's result.
-        assertTrue(src.contains("button(actions, ModelButton.GET, true, ::openSetup)"))
+        assertTrue(src.contains("button(actions, ModelButton.GET, true) { openSetup() }"))
+        // With no model at all it opens by itself, flagged so setup starts the recommended download.
+        assertTrue(src.contains("openSetup(auto = noModel && !pending)"))
         assertFalse(src.contains("\"Load model\" to ::pickModel"))
         assertTrue(src.contains("ModelButton.After.PickOwnFile -> pickModel()"))
         assertTrue(src.contains("ModelSetupActivity.hasPendingSetup(this)"))

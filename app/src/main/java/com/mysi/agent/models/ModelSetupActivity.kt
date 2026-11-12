@@ -52,6 +52,10 @@ class ModelSetupActivity : UiActivity() {
     private var use = Use.CHAT
     private var priority = Priority.BALANCED
     private var wifiOnly = true
+
+    /** Opened by the chat screen because there is no model: start the recommended download without a tap. */
+    private var auto = false
+    private var autoTried = false
     private val prefs by lazy { getSharedPreferences("model_setup_ui", MODE_PRIVATE) }
     private val listener: (SetupState) -> Unit = { render() }
 
@@ -64,8 +68,12 @@ class ModelSetupActivity : UiActivity() {
         use = savedInstanceState?.getString(KEY_USE)?.let(::useOf) ?: prefs.getString(KEY_USE, null)?.let(::useOf) ?: Use.CHAT
         priority = savedInstanceState?.getString(KEY_PRIORITY)?.let(::priorityOf) ?: prefs.getString(KEY_PRIORITY, null)?.let(::priorityOf) ?: Priority.BALANCED
         wifiOnly = savedInstanceState?.getBoolean(KEY_WIFI) ?: prefs.getBoolean(KEY_WIFI, true)
+        auto = intent.getBooleanExtra(EXTRA_AUTO, false)
+        autoTried = savedInstanceState?.getBoolean(KEY_AUTO_TRIED) ?: false
+        // An automatic first run skips the questions (a balanced pick for chat); they stay one tap
+        // away under "Change my answers".
         page = savedInstanceState?.getString(KEY_PAGE)?.let { runCatching { Page.valueOf(it) }.getOrNull() }
-            ?: if (prefs.contains(KEY_USE)) Page.MAIN else Page.QUESTIONS
+            ?: if (auto || prefs.contains(KEY_USE)) Page.MAIN else Page.QUESTIONS
         onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, onBackInvokedCallback)
         ModelSetup.resume(this, catalog)
         refreshCatalog()
@@ -99,6 +107,7 @@ class ModelSetupActivity : UiActivity() {
         outState.putString(KEY_USE, use.name)
         outState.putString(KEY_PRIORITY, priority.name)
         outState.putBoolean(KEY_WIFI, wifiOnly)
+        outState.putBoolean(KEY_AUTO_TRIED, autoTried)
     }
 
     /**
@@ -149,6 +158,7 @@ class ModelSetupActivity : UiActivity() {
                 if (!ModelSetup.running) store.pruneUnused(Agent.savedModel, store.loadPending())
                 debugOverride(DeviceProfiles.read(this@ModelSetupActivity, store.externalDir))
             }
+            startOnItsOwn()
             render()
         }
     }
@@ -180,6 +190,22 @@ class ModelSetupActivity : UiActivity() {
     }
 
     private fun advice(d: DeviceProfile) = ModelAdvisor.advise(d, catalog, use, priority)
+
+    /**
+     * First run with no model: download the recommended one straight away, on Wi-Fi only. On
+     * mobile data, or with no recommendation for this phone, the main page is shown instead and
+     * the user decides. Tried once per visit, so a cancel or a failure is not started again.
+     */
+    private fun startOnItsOwn() {
+        val d = device ?: return
+        val s = ModelSetup.state
+        val pick = advice(d).recommended
+        val idle = !s.busy && s !is SetupState.Done && s !is SetupState.Failed
+        if (!com.mysi.agent.ModelButton.startDownloadOnItsOwn(auto, autoTried, idle, pick != null, d.unmetered)) return
+        autoTried = true
+        wifiOnly = true
+        download(pick!!.entry)
+    }
 
     // ---------------- drawing ----------------
 
@@ -280,6 +306,7 @@ class ModelSetupActivity : UiActivity() {
             val c = card()
             text(c, "Recommended for your phone", 12f, muted, bold = true).isAccessibilityHeading = true
             modelDetails(c, pick)
+            if (auto && !d.unmetered) text(c, "You're not on Wi-Fi, so MySI has not started the ${Format.size(pick.entry.sizeBytes)} download by itself. Connect to Wi-Fi, or turn off \"Wi-Fi only\" below and tap Download and start.", 13f, WARN)
             button(c, "Download and start", primary = true) { download(pick.entry) }
             source(c, pick.entry)
             wifiSwitch(c, d)
@@ -506,6 +533,9 @@ class ModelSetupActivity : UiActivity() {
         const val EXTRA_MODEL_PATH = "com.mysi.agent.models.MODEL_PATH"
         const val EXTRA_MODEL_ID = "com.mysi.agent.models.MODEL_ID"
         const val EXTRA_SETUP_PENDING = "com.mysi.agent.models.SETUP_PENDING"
+        /** Set by the chat screen when it opens setup because there is no model. */
+        const val EXTRA_AUTO = "com.mysi.agent.models.AUTO"
+        private const val KEY_AUTO_TRIED = "auto_tried"
         private const val EXTRA_DEBUG_RAM_GB = "debug_ram_gb"
         private const val EXTRA_DEBUG_FREE_GB = "debug_free_gb"
 
