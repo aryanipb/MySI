@@ -8,6 +8,7 @@ import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.Switch
+import android.widget.TextView
 import com.mysi.agent.Agent
 import com.mysi.agent.UiActivity
 import kotlinx.coroutines.CoroutineScope
@@ -155,12 +156,29 @@ class ModelSetupActivity : UiActivity() {
         page = p
         render()
         scroll.post { scroll.scrollTo(0, 0) }
+        // The connection or free space may have changed since the screen opened.
+        readDevice()
     }
+
+    /** The views of a download or check card, updated in place on every progress tick. */
+    private class Live(val kind: Class<*>, val bar: ProgressBar, val amount: TextView, val detail: TextView)
+
+    private var live: Live? = null
 
     private fun render() {
         if (isFinishing || isDestroyed) return
-        body.removeAllViews()
         val s = ModelSetup.state
+        // Progress ticks every second: update the same views, so TalkBack keeps its place and
+        // nothing flickers. Anything else redraws the page.
+        live?.takeIf { it.kind == s.javaClass }?.let { v ->
+            when (s) {
+                is SetupState.Downloading -> return updateDownload(v, s)
+                is SetupState.Verifying -> return updateCheck(v, s)
+                else -> Unit
+            }
+        }
+        live = null
+        body.removeAllViews()
         val d = device
         when {
             s.busy || s is SetupState.Done -> progress(s)
@@ -306,14 +324,14 @@ class ModelSetupActivity : UiActivity() {
             heading(body, "Not available on this phone", 18f)
             out.forEach { x -> excluded(x) }
         }
-        wifiCard(d)
+        if (list.isNotEmpty()) wifiCard(d)
         button(body, "Back") { show(Page.MAIN) }
     }
 
     private fun untested(d: DeviceProfile) {
         val a = advice(d)
         heading(body, "Other models (untested)")
-        text(body, "These models have not been tested with MySI. Its tools, photos and audio may not work, and some may not load at all. MySI never picks them for you.", 14f, WARN)
+        text(body, "These models have not been tested with MySI. MySI's tools, photos and audio may not work with them, and some may not load at all. MySI never picks them for you.", 14f, WARN)
         a.untested.forEach { ch ->
             val c = card()
             modelDetails(c, ch)
@@ -342,11 +360,11 @@ class ModelSetupActivity : UiActivity() {
         val c = card()
         text(c, "Something went wrong", 13f, WARN, bold = true)
         text(c, message, 15f)
-        link("Dismiss") { ModelSetup.acknowledge() }
+        link("Dismiss", c) { ModelSetup.acknowledge() }
     }
 
-    private fun link(label: String, action: () -> Unit) =
-        text(body, label, 13f, muted).apply {
+    private fun link(label: String, parent: LinearLayout = body, action: () -> Unit) =
+        text(parent, label, 13f, muted).apply {
             setTextIsSelectable(false)
             minHeight = dp(44)
             gravity = Gravity.CENTER_VERTICAL
@@ -357,14 +375,34 @@ class ModelSetupActivity : UiActivity() {
             setOnClickListener { action() }
         }
 
-    private fun bar(parent: LinearLayout, done: Long, total: Long, label: String) {
+    private fun bar(parent: LinearLayout, done: Long, total: Long, label: String): ProgressBar {
         val pb = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 1000
-            progress = if (total > 0) (done.coerceAtMost(total) * 1000 / total).toInt() else 0
-            isIndeterminate = total <= 0
-            contentDescription = label
+            setBar(this, done, total, label)
         }
         parent.addView(pb, LinearLayout.LayoutParams(-1, dp(12)).apply { bottomMargin = dp(10) })
+        return pb
+    }
+
+    private fun setBar(pb: ProgressBar, done: Long, total: Long, label: String) {
+        pb.isIndeterminate = total <= 0
+        pb.progress = if (total > 0) (done.coerceAtMost(total) * 1000 / total).toInt() else 0
+        pb.contentDescription = label
+    }
+
+    private fun updateDownload(v: Live, s: SetupState.Downloading) {
+        val pct = Format.percent(s.done, s.total)
+        setBar(v.bar, s.done, s.total, "Download $pct percent")
+        v.amount.text = "${Format.progress(s.done, s.total)} ($pct%)"
+        // Waiting is shown in words, with the amber only as a second cue.
+        v.detail.text = s.paused ?: "${Format.speed(s.bytesPerSecond)} · ${Format.timeLeft(s.secondsLeft)}"
+        v.detail.setTextColor(if (s.paused != null) WARN else muted)
+    }
+
+    private fun updateCheck(v: Live, s: SetupState.Verifying) {
+        val pct = Format.percent(s.done, s.total)
+        setBar(v.bar, s.done, s.total, "Checking $pct percent")
+        v.amount.text = "Checked ${Format.progress(s.done, s.total)} ($pct%)"
     }
 
     private fun progress(s: SetupState) {
@@ -372,20 +410,18 @@ class ModelSetupActivity : UiActivity() {
         when (s) {
             is SetupState.Downloading -> {
                 heading(c, "Downloading ${s.name}", 20f)
-                val pct = Format.percent(s.done, s.total)
-                bar(c, s.done, s.total, "Download $pct percent")
-                text(c, "${Format.progress(s.done, s.total)} ($pct%)", 15f)
-                if (s.paused != null) text(c, s.paused, 14f, WARN)
-                else text(c, "${Format.speed(s.bytesPerSecond)} · ${Format.timeLeft(s.secondsLeft)}", 13f, muted)
+                val v = Live(s.javaClass, bar(c, 0, 0, ""), text(c, "", 15f), text(c, "", 13f, muted))
                 text(c, "You can leave this screen or close MySI; the download carries on. Open this screen again to finish.", 12f, muted)
                 button(c, "Cancel download") { ModelSetup.cancel(this) }
+                live = v
+                updateDownload(v, s)
             }
             is SetupState.Verifying -> {
                 heading(c, "Checking the download", 20f)
-                val pct = Format.percent(s.done, s.total)
-                bar(c, s.done, s.total, "Checking $pct percent")
-                text(c, "Making sure ${s.name} is exactly the published file ($pct%).", 14f, muted)
+                val v = Live(s.javaClass, bar(c, 0, 0, ""), text(c, "", 15f), text(c, "Making sure ${s.name} is exactly the published file.", 14f, muted))
                 button(c, "Cancel") { ModelSetup.cancel(this) }
+                live = v
+                updateCheck(v, s)
             }
             is SetupState.Loading -> {
                 heading(c, "Starting ${s.name}", 20f)

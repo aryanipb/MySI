@@ -43,6 +43,14 @@ class DeviceProfileTest {
     }
 
     @Test
+    fun implausibleAdvertisedSizeIsIgnored() {
+        // The verify36 emulator advertises 4 GB while its kernel manages 2.4 GiB.
+        assertEquals(3, phone(4, 2.4).ramGb)
+        assertEquals(4, phone(4, 3.6).ramGb)
+        assertEquals(16, phone(16, 14.9).ramGb)
+    }
+
+    @Test
     fun advertisedSizeRoundsToWholeGb() {
         assertEquals(6, phone(6, 5.5).copy(advertisedRamBytes = 6 * GIB - 100).ramGb)
     }

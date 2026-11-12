@@ -37,12 +37,14 @@ data class DeviceProfile(
 ) {
     /**
      * Phone memory in whole GB as people know it ("8 GB"). The advertised figure when Android
-     * reports one; otherwise [totalRamBytes] rounded up to the next common size, since the kernel
-     * always sees a little less than is fitted.
+     * reports a plausible one; otherwise [totalRamBytes] rounded up to the next common size, since
+     * the kernel always sees a little less than is fitted. An advertised figure far above what the
+     * kernel manages (seen on emulators given less memory than their device profile) is ignored.
      */
     val ramGb: Int
         get() {
-            if (advertisedRamBytes > 0) return ((advertisedRamBytes + Format.GIB / 2) / Format.GIB).toInt().coerceAtLeast(1)
+            if (advertisedRamBytes > 0 && advertisedRamBytes <= totalRamBytes * MAX_ADVERTISED_RATIO)
+                return ((advertisedRamBytes + Format.GIB / 2) / Format.GIB).toInt().coerceAtLeast(1)
             val gib = totalRamBytes.toDouble() / Format.GIB
             return COMMON_SIZES.firstOrNull { it >= gib } ?: kotlin.math.ceil(gib).toInt()
         }
@@ -63,6 +65,12 @@ data class DeviceProfile(
     companion object {
         /** Advertised RAM sizes phones ship with, in GB. */
         val COMMON_SIZES = listOf(1, 2, 3, 4, 6, 8, 10, 12, 16, 18, 20, 24, 32)
+
+        /**
+         * Real phones report totalMem a few percent to about 15% below the advertised size (kernel
+         * and firmware reservations; estimate). More than 30% apart means the advertised size is wrong.
+         */
+        const val MAX_ADVERTISED_RATIO = 1.3
     }
 }
 
@@ -105,9 +113,11 @@ object DeviceProfiles {
         return minOf(internal, external)
     }
 
-    /** The connection right now: unmetered (Wi-Fi) or not. */
-    fun unmetered(context: Context): Boolean {
+    /** The connection right now: (online, unmetered). */
+    fun network(context: Context): Pair<Boolean, Boolean> {
         val cm = context.getSystemService(ConnectivityManager::class.java)
-        return runCatching { cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) }.getOrNull() == true
+        val caps = runCatching { cm.getNetworkCapabilities(cm.activeNetwork) }.getOrNull()
+        return (caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true) to
+            (caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true)
     }
 }

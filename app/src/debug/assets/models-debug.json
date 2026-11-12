@@ -5,7 +5,7 @@
   "models": [
     {
       "id": "test-embeddinggemma-270m",
-      "name": "Download test (debug builds only)",
+      "name": "Small test file (debug builds only)",
       "publisher": "Google",
       "licence": "Apache-2.0",
       "repo": "litert-community/embeddinggemma-2-text-270m-litert-lm",

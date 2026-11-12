@@ -166,7 +166,7 @@ object ModelAdvisor {
     }
 
     internal fun warnings(device: DeviceProfile, e: ModelEntry): List<String> = buildList {
-        if (!e.verified || e.testOnly) add("Untested with MySI: its tools, photos and audio may not work.")
+        if (!e.verified || e.testOnly) add("Untested with MySI: MySI's tools, photos and audio may not work with it.")
         if (device.ramGb < e.minRamGb)
             add("Suggested minimum is ${e.minRamGb} GB of memory and this phone has ${device.ramGb} GB. It may be slow, or Android may close it.")
         if (device.lowMemoryNow || device.availableRamBytes < e.memoryBytes)

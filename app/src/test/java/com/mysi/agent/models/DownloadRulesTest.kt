@@ -108,15 +108,29 @@ class DownloadRulesTest {
         assertEquals("The download failed. Try again.", DownloadRules.failure(DownloadManager.ERROR_UNKNOWN))
     }
 
+    private fun waiting(s: DmSnapshot, wifiOnly: Boolean = true, unmetered: Boolean = true, online: Boolean = true) =
+        DownloadRules.waiting(s, wifiOnly, unmetered, online)
+
     @Test
     fun pausedReasonsDependOnWifiOnly() {
         val wifi = snap(DmStatus.PAUSED, DownloadManager.PAUSED_QUEUED_FOR_WIFI)
-        assertEquals("Waiting for Wi-Fi. Turn off \"Wi-Fi only\" to use mobile data instead.", DownloadRules.paused(wifi, wifiOnly = true))
-        assertEquals("Waiting for Wi-Fi: this download is too big for mobile data on this phone.", DownloadRules.paused(wifi, wifiOnly = false))
-        assertEquals("Waiting for an internet connection.", DownloadRules.paused(snap(DmStatus.PAUSED, DownloadManager.PAUSED_WAITING_FOR_NETWORK), true))
-        assertEquals("The connection dropped. Trying again shortly.", DownloadRules.paused(snap(DmStatus.PAUSED, DownloadManager.PAUSED_WAITING_TO_RETRY), true))
-        assertEquals("Paused. It will continue on its own.", DownloadRules.paused(snap(DmStatus.PAUSED, DownloadManager.PAUSED_UNKNOWN), true))
-        assertNull(DownloadRules.paused(snap(DmStatus.RUNNING), true))
+        assertEquals(DownloadRules.WAITING_FOR_WIFI, waiting(wifi))
+        assertTrue(DownloadRules.WAITING_FOR_WIFI.startsWith("Waiting for Wi-Fi, as you chose."))
+        assertEquals("Waiting for Wi-Fi: this download is too big for mobile data on this phone.", waiting(wifi, wifiOnly = false))
+        assertEquals("Waiting for an internet connection.", waiting(snap(DmStatus.PAUSED, DownloadManager.PAUSED_WAITING_FOR_NETWORK)))
+        assertEquals("The connection dropped. Trying again shortly.", waiting(snap(DmStatus.PAUSED, DownloadManager.PAUSED_WAITING_TO_RETRY)))
+        assertEquals("Paused. It will continue on its own.", waiting(snap(DmStatus.PAUSED, DownloadManager.PAUSED_UNKNOWN)))
+        assertNull(waiting(snap(DmStatus.RUNNING), unmetered = false))
+    }
+
+    @Test
+    fun pendingIsExplainedByTheConnection() {
+        // Seen on Android 16: a Wi-Fi-only download on mobile data stays "pending", not "paused".
+        val pending = snap(DmStatus.PENDING)
+        assertEquals(DownloadRules.WAITING_FOR_WIFI, waiting(pending, wifiOnly = true, unmetered = false))
+        assertNull(waiting(pending, wifiOnly = false, unmetered = false))
+        assertNull(waiting(pending, wifiOnly = true, unmetered = true))
+        assertEquals("Waiting for an internet connection.", waiting(pending, online = false))
     }
 
     // ---------------- speed and time left ----------------

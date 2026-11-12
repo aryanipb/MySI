@@ -83,12 +83,26 @@ object DownloadRules {
         }
     }
 
-    /** A plain-English line for a paused download, or null when it is not paused. */
-    fun paused(dm: DmSnapshot, wifiOnly: Boolean): String? {
+    const val WAITING_FOR_WIFI =
+        "Waiting for Wi-Fi, as you chose. To use mobile data instead, cancel and start again with \"Wi-Fi only\" turned off."
+
+    /**
+     * A plain-English line for a download that is waiting, or null while it runs. Recent Android
+     * versions leave a download that waits for its network as "pending" rather than "paused", so
+     * the current connection ([unmetered], [online]) is used to explain a pending one.
+     */
+    fun waiting(dm: DmSnapshot, wifiOnly: Boolean, unmetered: Boolean, online: Boolean): String? {
+        if (dm.status == DmStatus.PENDING) {
+            return when {
+                !online -> "Waiting for an internet connection."
+                wifiOnly && !unmetered -> WAITING_FOR_WIFI
+                else -> null
+            }
+        }
         if (dm.status != DmStatus.PAUSED) return null
         return when (dm.reason) {
             DownloadManager.PAUSED_QUEUED_FOR_WIFI ->
-                if (wifiOnly) "Waiting for Wi-Fi. Turn off \"Wi-Fi only\" to use mobile data instead."
+                if (wifiOnly) WAITING_FOR_WIFI
                 else "Waiting for Wi-Fi: this download is too big for mobile data on this phone."
             DownloadManager.PAUSED_WAITING_FOR_NETWORK -> "Waiting for an internet connection."
             DownloadManager.PAUSED_WAITING_TO_RETRY -> "The connection dropped. Trying again shortly."

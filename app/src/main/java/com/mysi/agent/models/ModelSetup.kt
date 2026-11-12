@@ -163,6 +163,7 @@ object ModelSetup {
             val (snap, downloadExists, finalExists) = withContext(Dispatchers.IO) {
                 Triple(if (p.moved) DmSnapshot(DmStatus.MISSING, 0, 0, -1) else dm.query(p.downloadId), File(p.downloadPath).isFile, File(p.finalPath).isFile)
             }
+            val (online, unmetered) = DeviceProfiles.network(app)
             when (val action = DownloadRules.resume(p, snap, downloadExists, finalExists, Agent.savedModel)) {
                 ResumeAction.None -> return
                 ResumeAction.Finished -> {
@@ -182,7 +183,7 @@ object ModelSetup {
                 ResumeAction.Watch -> {
                     meter.add(snap.done, SystemClock.elapsedRealtime())
                     val total = if (snap.total > 0) snap.total else p.sizeBytes
-                    set(SetupState.Downloading(p.modelName, snap.done, total, meter.bytesPerSecond, meter.secondsLeft(snap.done, total), DownloadRules.paused(snap, p.wifiOnly)))
+                    set(SetupState.Downloading(p.modelName, snap.done, total, meter.bytesPerSecond, meter.secondsLeft(snap.done, total), DownloadRules.waiting(snap, p.wifiOnly, unmetered, online)))
                     delay(POLL_MS)
                 }
                 ResumeAction.Move -> {
