@@ -28,7 +28,9 @@ import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.TextView
 import androidx.core.content.FileProvider
+import com.mysi.agent.models.LiteRtLmFile
 import com.mysi.agent.models.ModelSetupActivity
+import com.mysi.agent.models.ModelStore
 import com.mysi.agent.senses.LiveVisionActivity
 import com.mysi.agent.senses.Media
 import com.mysi.agent.senses.Recorder
@@ -45,6 +47,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -130,6 +133,7 @@ class MainActivity : UiActivity(), Host {
             else status.text = if (ModelSetupActivity.hasPendingSetup(this)) ModelButton.DOWNLOADING else ModelButton.NO_MODEL
         } else status.text = readyText()
         syncModelButton()
+        recoverInterruptedImport()
     }
 
     private fun readyText() = "Ready · ${Agent.backend} · ${Agent.toolCount} tools"
@@ -143,6 +147,21 @@ class MainActivity : UiActivity(), Host {
     private fun openSetup() {
         setupShown = true
         startActivityForResult(ModelSetupActivity.intent(this), REQ_SETUP)
+    }
+
+    /**
+     * Once per process: a "Load model" import whose load never finished (the model may have
+     * crashed the app) is deleted rather than retried, and the user is told why.
+     */
+    private fun recoverInterruptedImport() {
+        if (importChecked) return
+        importChecked = true
+        val app = applicationContext
+        ui.launch {
+            val message = withContext(Dispatchers.IO) { ModelStore.of(app).recoverInterruptedImport(Agent.savedModel) } ?: return@launch
+            text(log, "⚠ $message", 13f, Color.rgb(255, 160, 150))
+            if (!Agent.ready && Agent.savedModel == null) status.text = message
+        }
     }
 
     override var inFront = false
@@ -855,9 +874,20 @@ class MainActivity : UiActivity(), Host {
             return toast("Not enough free space: the model needs ${"%.1f".format(size / 1e9)} GB.")
         val dir = File(models, System.currentTimeMillis().toString())
         val dest = File(dir.apply { mkdirs() }, name)
-        status.text = "Copying $name into the app…"
         val app = applicationContext
+        val store = ModelStore.of(app)
         Agent.scope.launch {
+            // Turn a file that is not a chat model away before copying gigabytes of it.
+            val header = withContext(Dispatchers.IO) {
+                runCatching { contentResolver.openInputStream(uri)!!.use(LiteRtLmFile::check) }.getOrDefault(LiteRtLmFile.Result.Damaged)
+            }
+            LiteRtLmFile.message(header, name)?.let { problem ->
+                withContext(Dispatchers.IO) { dir.deleteRecursively() }
+                render(Event.Error(problem))
+                status.text = if (Agent.ready) readyText() else ModelButton.NO_MODEL
+                return@launch
+            }
+            status.text = "Copying $name into the app…"
             val ok =
                 withContext(Dispatchers.IO) {
                     runCatching {
@@ -870,14 +900,20 @@ class MainActivity : UiActivity(), Host {
                 status.text = "Copy failed. Check free space and try again."
                 return@launch
             }
+            // Saved before the native load: if this model crashes MySI, the next launch deletes it
+            // and says why, instead of leaving it behind (see recoverInterruptedImport).
+            withContext(Dispatchers.IO) { store.markImportLoading(dest) }
             val loaded = Agent.load(dest.absolutePath)
-            withContext(Dispatchers.IO) {
+            withContext(NonCancellable + Dispatchers.IO) {
                 if (loaded) {
                     models.listFiles()?.filter { it != dir }?.forEach { it.deleteRecursively() }
                     // Models downloaded by the setup screen are no longer used either.
                     ModelSetupActivity.pruneUnusedModels(app)
                 } else dir.deleteRecursively()
+                store.clearImportLoading()
             }
+            // A rejected file leaves the previous model loaded; the reason is already in the log.
+            if (!loaded) status.text = if (Agent.ready) readyText() else ModelButton.NO_MODEL
             syncModelButton()
         }
     }
@@ -909,6 +945,9 @@ class MainActivity : UiActivity(), Host {
 
         /** The setup screen was opened or returned in this process, so it is only offered from now on. */
         private var setupShown = false
+
+        /** recoverInterruptedImport ran in this process (it must not race an import of this process). */
+        private var importChecked = false
 
         /** The chat screen on show, for pickers that finish after a rotation. */
         @Volatile private var shown: WeakReference<MainActivity>? = null

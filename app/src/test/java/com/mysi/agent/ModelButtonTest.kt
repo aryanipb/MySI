@@ -50,5 +50,8 @@ class ModelButtonTest {
         assertTrue(src.contains("ModelButton.After.PickOwnFile -> pickModel()"))
         assertTrue(src.contains("ModelSetupActivity.hasPendingSetup(this)"))
         assertTrue(src.contains("ModelSetupActivity.pruneUnusedModels(app)"))
+        // The import is marked before its native load, and cleared after.
+        assertTrue(src.indexOf("store.markImportLoading(dest)") in 0 until src.indexOf("Agent.load(dest.absolutePath)"))
+        assertTrue(src.indexOf("store.clearImportLoading()") > src.indexOf("Agent.load(dest.absolutePath)"))
     }
 }

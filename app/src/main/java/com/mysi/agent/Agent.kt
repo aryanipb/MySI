@@ -21,6 +21,7 @@ import com.google.ai.edge.litertlm.OpenApiTool
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.ToolCall
 import com.google.ai.edge.litertlm.tool
+import com.mysi.agent.models.LiteRtLmFile
 import com.mysi.agent.senses.Accel
 import com.mysi.agent.senses.EnginePlan
 import com.mysi.agent.senses.LoadPlanner
@@ -189,6 +190,13 @@ object Agent {
     suspend fun load(path: String): Boolean =
         withContext(Dispatchers.IO) {
             withEngine {
+                // The engine aborts the whole app on a .litertlm that is not a chat model, so the
+                // file's own header is checked in Kotlin before any native call. A rejected file
+                // leaves the model in use loaded.
+                LiteRtLmFile.message(LiteRtLmFile.check(java.io.File(path)), java.io.File(path).name)?.let {
+                    emit(Event.Error(it))
+                    return@withEngine false
+                }
                 gen.withLock {
                     closeConversation()
                     engine?.close()

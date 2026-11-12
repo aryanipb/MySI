@@ -109,6 +109,33 @@ class ModelStore(val filesDir: File, val externalDir: File?, private val kv: Key
         for (dir in listOfNotNull(modelsDir, downloadsDir)) dir.listFiles()?.filter { it !in keep }?.forEach(::deleteFolder)
     }
 
+    /**
+     * Records that the chat screen's "Load model" is about to start [model], its copy in
+     * [importDir]. Saved to disk before the native load, so if the model crashes the app the next
+     * launch finds it (see [recoverInterruptedImport]): the same protection a download gets from
+     * [PendingDownload.loadStarted].
+     */
+    fun markImportLoading(model: File) = kv.put(KEY_IMPORT_LOADING, model.path)
+
+    /** The load of the marked import ended, whether it worked or not. */
+    fun clearImportLoading() = kv.put(KEY_IMPORT_LOADING, null)
+
+    /**
+     * Call once at launch. When a "Load model" import was being started as the app died, its
+     * folder is deleted (so it is never retried) and the message for the user is returned;
+     * otherwise null. A marked model that is the one loaded ([savedModel], only set after a
+     * successful load) did finish, so it is kept and only the mark is cleared.
+     */
+    fun recoverInterruptedImport(savedModel: String?): String? {
+        val path = kv.get(KEY_IMPORT_LOADING) ?: return null
+        kv.put(KEY_IMPORT_LOADING, null)
+        val model = File(path)
+        if (savedModel != null && File(savedModel) == model) return null
+        if (!inside(model, importDir)) return null
+        deleteFolder(model.parentFile)
+        return DownloadRules.closedWhileStarting(model.name)
+    }
+
     /** True when [file] is directly inside a folder of [root] (root/<stamp>/<file>). */
     private fun inside(file: File, root: File?): Boolean {
         root ?: return false
@@ -126,6 +153,7 @@ class ModelStore(val filesDir: File, val externalDir: File?, private val kv: Key
 
     companion object {
         private const val KEY_PENDING = "pending_download"
+        private const val KEY_IMPORT_LOADING = "import_loading"
 
         fun of(context: Context): ModelStore {
             val app = context.applicationContext
